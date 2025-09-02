@@ -20,37 +20,30 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-// EDIT THIS FILE!  THIS IS SCAFFOLDING FOR YOU TO OWN!
-// NOTE: json tags are required.  Any new fields you add must have json tags for the fields to be serialized.
-
 // ConfigurationSpec defines the desired state of Configuration
 type ConfigurationSpec struct {
-	// INSERT ADDITIONAL SPEC FIELDS - desired state of cluster
-	// Important: Run "make" to regenerate code after modifying this file
-	// The following markers will use OpenAPI v3 schema to validate the value
-	// More info: https://book.kubebuilder.io/reference/markers/crd-validation.html
+	// Path is the file path where the content should be written
+	Path string `json:"path,omitempty"`
 
-	// foo is an example field of Configuration. Edit configuration_types.go to remove/update
+	// Content is the content to be written to the file
+	Content string `json:"content"`
+
+	// Create indicates whether to create the file if it does not exist
+	Create bool `json:"create,omitempty"`
 	// +optional
-	Foo *string `json:"foo,omitempty"`
+	Permission *uint32 `json:"permission,omitempty"`
 }
 
 // ConfigurationStatus defines the observed state of Configuration.
 type ConfigurationStatus struct {
-	// INSERT ADDITIONAL STATUS FIELD - define observed state of cluster
-	// Important: Run "make" to regenerate code after modifying this file
+	// LastUpdated is the last time the configuration was updated
+	LastUpdated metav1.Time `json:"lastUpdated,omitempty"`
 
-	// For Kubernetes API conventions, see:
-	// https://github.com/kubernetes/community/blob/master/contributors/devel/sig-architecture/api-conventions.md#typical-status-properties
+	// Content is the current content of the file at the specified path
+	Content string `json:"content,omitempty"`
 
-	// conditions represent the current state of the Configuration resource.
-	// Each condition has a unique type and reflects the status of a specific aspect of the resource.
-	//
-	// Standard condition types include:
-	// - "Available": the resource is fully functional
-	// - "Progressing": the resource is being created or updated
-	// - "Degraded": the resource failed to reach or maintain its desired state
-	//
+	// FileExists indicates whether the file exists at the specified path
+	FileExists bool `json:"fileExists,omitempty"`
 	// The status of each condition is one of True, False, or Unknown.
 	// +listType=map
 	// +listMapKey=type
