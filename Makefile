@@ -1,3 +1,6 @@
+OS=$(shell go env GOOS)
+ARCH=$(shell go env GOARCH)
+
 # Image URL to use all building/pushing image targets
 IMG ?= controller:latest
 
@@ -174,17 +177,19 @@ undeploy: kustomize ## Undeploy controller from the K8s cluster specified in ~/.
 ## Location to install dependencies to
 LOCALBIN ?= $(shell pwd)/bin
 $(LOCALBIN):
-	mkdir -p $(LOCALBIN)
+	@mkdir -p $(LOCALBIN)
 
 ## Tool Binaries
-KUBECTL ?= kubectl
-KIND ?= kind
+KUBECTL ?= $(LOCALBIN)/kubectl
+KIND ?= $(LOCALBIN)/kind
 KUSTOMIZE ?= $(LOCALBIN)/kustomize
 CONTROLLER_GEN ?= $(LOCALBIN)/controller-gen
 ENVTEST ?= $(LOCALBIN)/setup-envtest
 GOLANGCI_LINT = $(LOCALBIN)/golangci-lint
 
 ## Tool Versions
+KUBECTL_VERSION ?= 1.34.0
+KIND_VERSION ?= 0.30.0
 KUSTOMIZE_VERSION ?= v5.6.0
 CONTROLLER_TOOLS_VERSION ?= v0.18.0
 #ENVTEST_VERSION is the version of controller-runtime release branch to fetch the envtest setup script (i.e. release-0.20)
@@ -221,6 +226,28 @@ golangci-lint: $(GOLANGCI_LINT) ## Download golangci-lint locally if necessary.
 $(GOLANGCI_LINT): $(LOCALBIN)
 	$(call go-install-tool,$(GOLANGCI_LINT),github.com/golangci/golangci-lint/v2/cmd/golangci-lint,$(GOLANGCI_LINT_VERSION))
 
+# extra deps
+.PHONY: kubectl
+kubectl: $(KUBECTL) ## Download kubectl locally if necessary.
+$(KUBECTL): $(LOCALBIN)
+	@command -v $(KUBECTL) >/dev/null 2>&1 || { \
+		curl -sSL "https://dl.k8s.io/release/$(KUBECTL VERSION)/bin/$(OS)/$(ARCH)/kubectl" -o $(KUBECTL)-v$(KUBECTL_VERSION) ;\
+		chmod 0755 $(KUBECTL)-v$(KUBECTL_VERSION) ;\
+		ln -sf $(KUBECTL)-v$(KUBECTL_VERSION) $(KUBECTL) ;\
+		echo "downloaded $(shell basename $(KUBECTL)) $(KUBECTL_VERSION) in $(LOCALBIN)" ;\
+	}
+
+.PHONY: kind
+kind: $(KIND) ## Download kind locally if necessary.
+$(KIND): $(LOCALBIN)
+	@command -v $(KIND) >/dev/null 2>&1 || { \
+		curl -sSL "https://kind.sigs.k8s.io/dl/v$(KIND_VERSION)/kind-$(OS)-$(ARCH)" -o $(KIND)-v$(KIND_VERSION) ;\
+		chmod 0755 $(KIND)-v$(KIND_VERSION) ;\
+		ln -sf $(KIND)-v$(KIND_VERSION) $(KIND) ;\
+		echo "downloaded $(shell basename $(KIND)) $(KIND_VERSION) in $(LOCALBIN)" ;\
+	}
+
+
 # go-install-tool will 'go install' any package with custom target and name of binary, if it doesn't exist
 # $1 - target path with name of binary
 # $2 - package url which can be installed
@@ -233,6 +260,7 @@ echo "Downloading $${package}" ;\
 rm -f $(1) ;\
 GOBIN=$(LOCALBIN) go install $${package} ;\
 mv $(1) $(1)-$(3) ;\
+echo "downloaded $$(basename $(1)) $(3) in $(LOCALBIN)" ;\
 } ;\
 ln -sf $$(realpath $(1)-$(3)) $(1)
 endef
