@@ -1,8 +1,35 @@
 # k8s-example-kubedredger
-// TODO(user): Add simple overview of use/purpose
+
+kubedredger is an example controller which manages the configuration files hierarchy for
+an hypotetical application.
+It is meant to be an educational tool.
 
 ## Description
-// TODO(user): An in-depth paragraph about your project and overview of use
+This project is an educational tool which complements the golab.io 2025 session.
+While the project attempts to be realistic and adopts best practices and
+it is based on production ready framework and libraries, it is an example which
+should never be used anywhere near production environments.
+
+What is "kubedredger"?
+The name aims to keep the sea/water/marine kubernetes theme.
+
+**dredge**
+```
+ _verb: dredge; 3rd person present: dredges; past tense: dredged; past participle: dredged; gerund or present participle: dredging_
+
+    clear the bed of (a harbour, river, or other area of water) by scooping out mud, weeds, and rubbish with a dredge.
+    "the lower stretch of the river had been dredged"
+    bring up or clear (something) from a river, harbour, or other area of water with a dredge.
+    "mud was dredged out of the harbour"
+    bring something unwelcome and forgotten or obscure to people's attention.
+    "I don't understand why you had to dredge up this story"
+
+*_noun: dredge; plural noun: dredges_
+
+    an apparatus for bringing up objects or mud from a river or seabed by scooping or dragging.
+```
+
+This projects keeps the configuration stream clean and tidy so the application can safely navigate it.
 
 ## Getting Started
 
@@ -10,7 +37,7 @@
 - go version v1.24.0+
 - docker version 17.03+.
 - kubectl version v1.11.3+.
-- Access to a Kubernetes v1.11.3+ cluster.
+- Access to a Kubernetes cluster through [kind](https://kind.sigs.k8s.io/docs/user/quick-start/)
 
 ### To Deploy on the cluster
 **Build and push your image to the location specified by `IMG`:**
@@ -29,7 +56,7 @@ Make sure you have the proper permission to the registry if the above commands d
 make install
 ```
 
-**Deploy the Manager to the cluster with the image specified by `IMG`:**
+**Deploy the Kubedredger to the cluster with the image specified by `IMG`:**
 
 ```sh
 make deploy IMG=<some-registry>/k8s-example-kubedredger:tag
@@ -66,57 +93,6 @@ make uninstall
 make undeploy
 ```
 
-## Project Distribution
-
-Following the options to release and provide this solution to the users.
-
-### By providing a bundle with all YAML files
-
-1. Build the installer for the image built and published in the registry:
-
-```sh
-make build-installer IMG=<some-registry>/k8s-example-kubedredger:tag
-```
-
-**NOTE:** The makefile target mentioned above generates an 'install.yaml'
-file in the dist directory. This file contains all the resources built
-with Kustomize, which are necessary to install this project without its
-dependencies.
-
-2. Using the installer
-
-Users can just run 'kubectl apply -f <URL for YAML BUNDLE>' to install
-the project, i.e.:
-
-```sh
-kubectl apply -f https://raw.githubusercontent.com/<org>/k8s-example-kubedredger/<tag or branch>/dist/install.yaml
-```
-
-### By providing a Helm Chart
-
-1. Build the chart using the optional helm plugin
-
-```sh
-kubebuilder edit --plugins=helm/v1-alpha
-```
-
-2. See that a chart was generated under 'dist/chart', and users
-can obtain this solution from there.
-
-**NOTE:** If you change the project, you need to update the Helm Chart
-using the same command above to sync the latest changes. Furthermore,
-if you create webhooks, you need to use the above command with
-the '--force' flag and manually ensure that any custom configuration
-previously added to 'dist/chart/values.yaml' or 'dist/chart/manager/manager.yaml'
-is manually re-applied afterwards.
-
-## Contributing
-// TODO(user): Add detailed information on how you would like others to contribute to this project
-
-**NOTE:** Run `make help` for more information on all potential `make` targets
-
-More information can be found via the [Kubebuilder Documentation](https://book.kubebuilder.io/introduction.html)
-
 ## License
 
 Copyright 2025.
@@ -132,4 +108,3 @@ distributed under the License is distributed on an "AS IS" BASIS,
 WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
-
