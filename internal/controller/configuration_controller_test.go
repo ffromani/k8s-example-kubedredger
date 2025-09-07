@@ -18,11 +18,16 @@ package controller
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	"k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/client-go/kubernetes/scheme"
+	"k8s.io/utils/ptr"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -30,55 +35,152 @@ import (
 	workshopv1alpha1 "golab.io/kubedredger/api/v1alpha1"
 )
 
+func NewFakeConfigurationReconciler(initObjects ...runtime.Object) (*ConfigurationReconciler, func() error, error) {
+	dir, err := os.MkdirTemp("", "kubedredger-ctrl-test")
+	if err != nil {
+		return nil, func() error { return nil }, err
+	}
+	GinkgoLogr.Info("created temporary directory", "path", dir)
+	cleanup := func() error {
+		return os.RemoveAll(dir)
+	}
+	fakeClient := fake.NewClientBuilder().WithScheme(scheme.Scheme).WithStatusSubresource(&workshopv1alpha1.Configuration{}).WithRuntimeObjects(initObjects...).Build()
+	rec := ConfigurationReconciler{
+		Client:            fakeClient,
+		Scheme:            scheme.Scheme,
+		ConfigurationRoot: dir,
+	}
+	return &rec, cleanup, nil
+}
+
 var _ = Describe("Configuration Controller", func() {
 	Context("When reconciling a resource", func() {
-		const resourceName = "test-resource"
-
-		ctx := context.Background()
-
-		typeNamespacedName := types.NamespacedName{
-			Name:      resourceName,
-			Namespace: "default", // TODO(user):Modify as needed
-		}
-		configuration := &workshopv1alpha1.Configuration{}
+		var cleanup func() error
+		var reconciler *ConfigurationReconciler
 
 		BeforeEach(func() {
-			By("creating the custom resource for the Kind Configuration")
-			err := k8sClient.Get(ctx, typeNamespacedName, configuration)
-			if err != nil && errors.IsNotFound(err) {
-				resource := &workshopv1alpha1.Configuration{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:      resourceName,
-						Namespace: "default",
-					},
-					// TODO(user): Specify other spec details if needed.
-				}
-				Expect(k8sClient.Create(ctx, resource)).To(Succeed())
-			}
+			var err error
+			reconciler, cleanup, err = NewFakeConfigurationReconciler()
+			Expect(err).ToNot(HaveOccurred())
 		})
 
 		AfterEach(func() {
-			// TODO(user): Cleanup logic after each test, like removing the resource instance.
-			resource := &workshopv1alpha1.Configuration{}
-			err := k8sClient.Get(ctx, typeNamespacedName, resource)
-			Expect(err).NotTo(HaveOccurred())
-
-			By("Cleanup the specific resource instance Configuration")
-			Expect(k8sClient.Delete(ctx, resource)).To(Succeed())
+			Expect(cleanup()).To(Succeed())
 		})
-		It("should successfully reconcile the resource", func() {
-			By("Reconciling the created resource")
-			controllerReconciler := &ConfigurationReconciler{
-				Client: k8sClient,
-				Scheme: k8sClient.Scheme(),
-			}
 
-			_, err := controllerReconciler.Reconcile(ctx, reconcile.Request{
-				NamespacedName: typeNamespacedName,
-			})
+		It("creates the configuration from scratch", func(ctx context.Context) {
+			conf := &workshopv1alpha1.Configuration{
+				ObjectMeta: metav1.ObjectMeta{
+					Namespace: "test-namespace",
+					Name:      "test-create",
+				},
+				Spec: workshopv1alpha1.ConfigurationSpec{
+					Path:       "foobar.conf",
+					Content:    "foo=bar\nbaz=42\n",
+					Create:     true,
+					Permission: ptr.To[uint32](0600),
+				},
+			}
+			key := client.ObjectKeyFromObject(conf)
+			Expect(reconciler.Client.Create(ctx, conf)).To(Succeed())
+			_, err := reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: key})
 			Expect(err).NotTo(HaveOccurred())
-			// TODO(user): Add more specific assertions depending on your controller's reconciliation logic.
-			// Example: If you expect a certain status condition after reconciliation, verify it here.
+
+			fullPath := filepath.Join(reconciler.ConfigurationRoot, conf.Spec.Path)
+			finfo, err := os.Stat(fullPath)
+			Expect(err).NotTo(HaveOccurred(), "error Stat()ing configuration file")
+
+			Expect(uint32(finfo.Mode())).To(Equal(uint32(0600)), "error checking permissions, got %o expected %o", finfo.Mode(), 0600)
+			data, err := os.ReadFile(fullPath)
+			Expect(err).NotTo(HaveOccurred(), "error reading configuration file content")
+			Expect(string(data)).To(Equal(conf.Spec.Content), "configuration content doesn't match")
+		})
+
+		It("updates the configuration once created", func(ctx context.Context) {
+			conf := &workshopv1alpha1.Configuration{
+				ObjectMeta: metav1.ObjectMeta{
+					Namespace: "test-namespace",
+					Name:      "test-create",
+				},
+				Spec: workshopv1alpha1.ConfigurationSpec{
+					Path:       "foobar.conf",
+					Content:    "foo=bar\n",
+					Create:     true,
+					Permission: ptr.To[uint32](0600),
+				},
+			}
+			key := client.ObjectKeyFromObject(conf)
+			Expect(reconciler.Client.Create(ctx, conf)).To(Succeed())
+			_, err := reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: key})
+			Expect(err).NotTo(HaveOccurred())
+
+			fullPath := filepath.Join(reconciler.ConfigurationRoot, conf.Spec.Path)
+
+			finfo, err := os.Stat(fullPath)
+			Expect(err).NotTo(HaveOccurred(), "error Stat()ing configuration file")
+			Expect(uint32(finfo.Mode())).To(Equal(uint32(0600)), "error checking permissions, got %o expected %o", finfo.Mode(), 0600)
+
+			data, err := os.ReadFile(fullPath)
+			Expect(err).NotTo(HaveOccurred(), "error reading configuration file content")
+			Expect(string(data)).To(Equal(conf.Spec.Content), "configuration content doesn't match")
+
+			conf.Spec.Create = false
+			conf.Spec.Permission = nil
+			conf.Spec.Content = "answer=42\n"
+			Expect(reconciler.Client.Update(ctx, conf)).To(Succeed())
+			_, err = reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: key})
+			Expect(err).NotTo(HaveOccurred())
+
+			finfo2, err := os.Stat(fullPath)
+			Expect(err).NotTo(HaveOccurred(), "error Stat()ing configuration file")
+			Expect(uint32(finfo2.Mode())).To(Equal(uint32(0600)), "error checking permissions, got %o expected %o", finfo2.Mode(), 0600)
+
+			data, err = os.ReadFile(fullPath)
+			Expect(err).NotTo(HaveOccurred(), "error reading configuration file content")
+			Expect(string(data)).To(Equal(conf.Spec.Content), "configuration content doesn't match")
+		})
+
+		It("does not create the same configuration file twice", func(ctx context.Context) {
+			origContent := "foo=bar\n"
+			conf := &workshopv1alpha1.Configuration{
+				ObjectMeta: metav1.ObjectMeta{
+					Namespace: "test-namespace",
+					Name:      "test-create",
+				},
+				Spec: workshopv1alpha1.ConfigurationSpec{
+					Path:       "foobar.conf",
+					Content:    origContent,
+					Create:     true,
+					Permission: ptr.To[uint32](0600),
+				},
+			}
+			key := client.ObjectKeyFromObject(conf)
+			Expect(reconciler.Client.Create(ctx, conf)).To(Succeed())
+			_, err := reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: key})
+			Expect(err).NotTo(HaveOccurred())
+
+			fullPath := filepath.Join(reconciler.ConfigurationRoot, conf.Spec.Path)
+
+			finfo, err := os.Stat(fullPath)
+			Expect(err).NotTo(HaveOccurred(), "error Stat()ing configuration file")
+			Expect(uint32(finfo.Mode())).To(Equal(uint32(0600)), "error checking permissions, got %o expected %o", finfo.Mode(), 0600)
+
+			data, err := os.ReadFile(fullPath)
+			Expect(err).NotTo(HaveOccurred(), "error reading configuration file content")
+			Expect(string(data)).To(Equal(conf.Spec.Content), "configuration content doesn't match")
+
+			conf.Spec.Content = "answer=42\n"
+			Expect(reconciler.Client.Update(ctx, conf)).To(Succeed())
+			_, err = reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: key})
+			Expect(err).To(HaveOccurred())
+
+			finfo2, err := os.Stat(fullPath)
+			Expect(err).NotTo(HaveOccurred(), "error Stat()ing configuration file")
+			Expect(uint32(finfo2.Mode())).To(Equal(uint32(0600)), "error checking permissions, got %o expected %o", finfo2.Mode(), 0600)
+
+			data, err = os.ReadFile(fullPath)
+			Expect(err).NotTo(HaveOccurred(), "error reading configuration file content")
+			Expect(string(data)).To(Equal(origContent), "configuration content doesn't match")
 		})
 	})
 })
