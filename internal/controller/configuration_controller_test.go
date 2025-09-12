@@ -18,6 +18,7 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -42,6 +43,8 @@ import (
 
 const (
 	testNodeName = "test-host"
+
+	confSnippet = "answer=42\n"
 )
 
 func NewFakeConfigurationReconciler(initObjects ...runtime.Object) (*ConfigurationReconciler, func() error, error) {
@@ -153,6 +156,60 @@ var _ = Describe("Configuration Controller", func() {
 			Expect(string(data)).To(Equal(conf.Spec.Content), "configuration content doesn't match")
 		})
 
+		It("creates the configuration from scratch, but stays in progress if can't update the k8s node object, then succeeds", func(ctx context.Context) {
+			conf := &workshopv1alpha1.Configuration{
+				ObjectMeta: metav1.ObjectMeta{
+					Namespace: "test-namespace",
+					Name:      "test-create",
+				},
+				Spec: workshopv1alpha1.ConfigurationSpec{
+					Path:       "foobar.conf",
+					Content:    "foo=bar\nbaz=42\n",
+					Create:     true,
+					Permission: ptr.To[uint32](0600),
+				},
+			}
+			Expect(reconciler.Client.Create(ctx, conf)).To(Succeed())
+			key := client.ObjectKeyFromObject(conf)
+			_, err := reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: key})
+			Expect(err).To(HaveOccurred())
+
+			updatedConf := &workshopv1alpha1.Configuration{}
+			Expect(reconciler.Client.Get(ctx, key, updatedConf)).To(Succeed())
+			Expect(verifyProgressingStatus(&updatedConf.Status)).To(Succeed())
+
+			// still should have created the file!
+			fullPath := filepath.Join(reconciler.ConfMgr.GetConfigurationRoot(), conf.Spec.Path)
+			finfo, err := os.Stat(fullPath)
+			Expect(err).NotTo(HaveOccurred(), "error Stat()ing configuration file")
+
+			Expect(uint32(finfo.Mode())).To(Equal(uint32(0600)), "error checking permissions, got %o expected %o", finfo.Mode(), 0600)
+			data, err := os.ReadFile(fullPath)
+			Expect(err).NotTo(HaveOccurred(), "error reading configuration file content")
+			Expect(string(data)).To(Equal(conf.Spec.Content), "configuration content doesn't match")
+
+			Expect(reconciler.Client.Create(ctx, testNode)).To(Succeed())
+
+			var updatedNode v1.Node
+			Expect(reconciler.Client.Get(ctx, client.ObjectKeyFromObject(testNode), &updatedNode)).To(Succeed())
+			Expect(updatedNode.Labels).ToNot(HaveKey(nodelabel.ContentHash))
+
+			_, err = reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: key})
+			Expect(err).ToNot(HaveOccurred())
+			finfo, err = os.Stat(fullPath)
+			Expect(err).NotTo(HaveOccurred(), "error Stat()ing configuration file")
+
+			Expect(uint32(finfo.Mode())).To(Equal(uint32(0600)), "error checking permissions, got %o expected %o", finfo.Mode(), 0600)
+			data, err = os.ReadFile(fullPath)
+			Expect(err).NotTo(HaveOccurred(), "error reading configuration file content")
+			Expect(string(data)).To(Equal(conf.Spec.Content), "configuration content doesn't match")
+
+			Expect(reconciler.Client.Get(ctx, key, updatedConf)).To(Succeed())
+			Expect(verifyAvailableStatus(&updatedConf.Status)).To(Succeed())
+
+			Expect(verifyNodeIsLabelled(ctx, reconciler.Client, testNode.Name)).To(Succeed())
+		})
+
 		It("updates the configuration once created", func(ctx context.Context) {
 			Expect(reconciler.Client.Create(ctx, testNode)).To(Succeed())
 
@@ -190,7 +247,7 @@ var _ = Describe("Configuration Controller", func() {
 			Expect(reconciler.Client.Get(ctx, client.ObjectKeyFromObject(conf), conf)).To(Succeed())
 			conf.Spec.Create = false
 			conf.Spec.Permission = nil
-			conf.Spec.Content = "answer=42\n"
+			conf.Spec.Content = confSnippet
 			Expect(reconciler.Client.Update(ctx, conf)).To(Succeed())
 			_, err = reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: key})
 			Expect(err).NotTo(HaveOccurred())
@@ -205,6 +262,7 @@ var _ = Describe("Configuration Controller", func() {
 
 			Expect(reconciler.Client.Get(ctx, key, updatedConf)).To(Succeed())
 			Expect(verifyAvailableStatus(&updatedConf.Status)).To(Succeed())
+			Expect(verifyNodeIsLabelled(ctx, reconciler.Client, testNode.Name)).To(Succeed())
 		})
 
 		It("does not create the same configuration file twice", func(ctx context.Context) {
@@ -243,7 +301,7 @@ var _ = Describe("Configuration Controller", func() {
 			Expect(verifyAvailableStatus(&updatedConf.Status)).To(Succeed())
 
 			Expect(reconciler.Client.Get(ctx, client.ObjectKeyFromObject(conf), conf)).To(Succeed())
-			conf.Spec.Content = "answer=42\n"
+			conf.Spec.Content = confSnippet
 			Expect(reconciler.Client.Update(ctx, conf)).To(Succeed())
 			_, err = reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: key})
 			Expect(err).To(HaveOccurred())
@@ -258,6 +316,81 @@ var _ = Describe("Configuration Controller", func() {
 
 			Expect(reconciler.Client.Get(ctx, key, updatedConf)).To(Succeed())
 			Expect(verifyDegradedStatus(&updatedConf.Status)).To(Succeed())
+		})
+
+		It("updates the configuration once created multiple times", func(ctx context.Context) {
+			Expect(reconciler.Client.Create(ctx, testNode)).To(Succeed())
+
+			conf := &workshopv1alpha1.Configuration{
+				ObjectMeta: metav1.ObjectMeta{
+					Namespace: "test-namespace",
+					Name:      "test-create",
+				},
+				Spec: workshopv1alpha1.ConfigurationSpec{
+					Path:       "foobar.conf",
+					Content:    "foo=bar\n",
+					Create:     true,
+					Permission: ptr.To[uint32](0600),
+				},
+			}
+			key := client.ObjectKeyFromObject(conf)
+			Expect(reconciler.Client.Create(ctx, conf)).To(Succeed())
+			_, err := reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: key})
+			Expect(err).NotTo(HaveOccurred())
+
+			fullPath := filepath.Join(reconciler.ConfMgr.GetConfigurationRoot(), conf.Spec.Path)
+
+			finfo, err := os.Stat(fullPath)
+			Expect(err).NotTo(HaveOccurred(), "error Stat()ing configuration file")
+			Expect(uint32(finfo.Mode())).To(Equal(uint32(0600)), "error checking permissions, got %o expected %o", finfo.Mode(), 0600)
+
+			data, err := os.ReadFile(fullPath)
+			Expect(err).NotTo(HaveOccurred(), "error reading configuration file content")
+			Expect(string(data)).To(Equal(conf.Spec.Content), "configuration content doesn't match")
+
+			updatedConf := &workshopv1alpha1.Configuration{}
+			Expect(reconciler.Client.Get(ctx, key, updatedConf)).To(Succeed())
+			Expect(verifyAvailableStatus(&updatedConf.Status)).To(Succeed())
+
+			Expect(reconciler.Client.Get(ctx, client.ObjectKeyFromObject(conf), conf)).To(Succeed())
+			conf.Spec.Create = false
+			conf.Spec.Permission = nil
+			conf.Spec.Content = confSnippet
+			Expect(reconciler.Client.Update(ctx, conf)).To(Succeed())
+			_, err = reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: key})
+			Expect(err).NotTo(HaveOccurred())
+
+			finfo2, err := os.Stat(fullPath)
+			Expect(err).NotTo(HaveOccurred(), "error Stat()ing configuration file")
+			Expect(uint32(finfo2.Mode())).To(Equal(uint32(0600)), "error checking permissions, got %o expected %o", finfo2.Mode(), 0600)
+
+			data, err = os.ReadFile(fullPath)
+			Expect(err).NotTo(HaveOccurred(), "error reading configuration file content")
+			Expect(string(data)).To(Equal(conf.Spec.Content), "configuration content doesn't match")
+
+			Expect(reconciler.Client.Get(ctx, key, updatedConf)).To(Succeed())
+			Expect(verifyAvailableStatus(&updatedConf.Status)).To(Succeed())
+			Expect(verifyNodeIsLabelled(ctx, reconciler.Client, testNode.Name)).To(Succeed())
+
+			Expect(reconciler.Client.Get(ctx, client.ObjectKeyFromObject(conf), conf)).To(Succeed())
+			conf.Spec.Create = false
+			conf.Spec.Permission = nil
+			conf.Spec.Content = "#answer=42\nattempts=2\nverify=always\n"
+			Expect(reconciler.Client.Update(ctx, conf)).To(Succeed())
+			_, err = reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: key})
+			Expect(err).NotTo(HaveOccurred())
+
+			finfo2, err = os.Stat(fullPath)
+			Expect(err).NotTo(HaveOccurred(), "error Stat()ing configuration file")
+			Expect(uint32(finfo2.Mode())).To(Equal(uint32(0600)), "error checking permissions, got %o expected %o", finfo2.Mode(), 0600)
+
+			data, err = os.ReadFile(fullPath)
+			Expect(err).NotTo(HaveOccurred(), "error reading configuration file content")
+			Expect(string(data)).To(Equal(conf.Spec.Content), "configuration content doesn't match")
+
+			Expect(reconciler.Client.Get(ctx, key, updatedConf)).To(Succeed())
+			Expect(verifyAvailableStatus(&updatedConf.Status)).To(Succeed())
+			Expect(verifyNodeIsLabelled(ctx, reconciler.Client, testNode.Name)).To(Succeed())
 		})
 	})
 })
@@ -296,4 +429,19 @@ func isConditionEqual(conds []metav1.Condition, condType string, condStatus meta
 		return cond.Status == condStatus
 	}
 	return false
+}
+
+func verifyNodeIsLabelled(ctx context.Context, cli client.Client, nodeName string) error {
+	var updatedNode v1.Node
+	if err := cli.Get(ctx, client.ObjectKey{Name: nodeName}, &updatedNode); err != nil {
+		return err
+	}
+	val, ok := updatedNode.Labels[nodelabel.ContentHash]
+	if !ok {
+		return errors.New("missing contenthash key")
+	}
+	if val == "" {
+		return errors.New("empty contenthash value")
+	}
+	return nil
 }

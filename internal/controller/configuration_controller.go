@@ -72,7 +72,7 @@ func (r *ConfigurationReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 
 	oldStatus := conf.Status.DeepCopy()
 
-	res := r.ConfMgr.Handle(lh, conf.Spec)
+	res := r.ConfMgr.Handle(lh, conf)
 
 	if res.Error == nil {
 		contentHash := fmt.Sprintf("%x", sha256.Sum256([]byte(conf.Spec.Content)))
