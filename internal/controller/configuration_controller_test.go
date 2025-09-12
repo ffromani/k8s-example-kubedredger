@@ -33,6 +33,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	workshopv1alpha1 "golab.io/kubedredger/api/v1alpha1"
+	"golab.io/kubedredger/internal/configfile"
 )
 
 func NewFakeConfigurationReconciler(initObjects ...runtime.Object) (*ConfigurationReconciler, func() error, error) {
@@ -46,9 +47,9 @@ func NewFakeConfigurationReconciler(initObjects ...runtime.Object) (*Configurati
 	}
 	fakeClient := fake.NewClientBuilder().WithScheme(scheme.Scheme).WithStatusSubresource(&workshopv1alpha1.Configuration{}).WithRuntimeObjects(initObjects...).Build()
 	rec := ConfigurationReconciler{
-		Client:            fakeClient,
-		Scheme:            scheme.Scheme,
-		ConfigurationRoot: dir,
+		Client:  fakeClient,
+		Scheme:  scheme.Scheme,
+		ConfMgr: configfile.NewManager(dir),
 	}
 	return &rec, cleanup, nil
 }
@@ -86,7 +87,7 @@ var _ = Describe("Configuration Controller", func() {
 			_, err := reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: key})
 			Expect(err).NotTo(HaveOccurred())
 
-			fullPath := filepath.Join(reconciler.ConfigurationRoot, conf.Spec.Path)
+			fullPath := filepath.Join(reconciler.ConfMgr.GetConfigurationRoot(), conf.Spec.Path)
 			finfo, err := os.Stat(fullPath)
 			Expect(err).NotTo(HaveOccurred(), "error Stat()ing configuration file")
 
@@ -114,7 +115,7 @@ var _ = Describe("Configuration Controller", func() {
 			_, err := reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: key})
 			Expect(err).NotTo(HaveOccurred())
 
-			fullPath := filepath.Join(reconciler.ConfigurationRoot, conf.Spec.Path)
+			fullPath := filepath.Join(reconciler.ConfMgr.GetConfigurationRoot(), conf.Spec.Path)
 
 			finfo, err := os.Stat(fullPath)
 			Expect(err).NotTo(HaveOccurred(), "error Stat()ing configuration file")
@@ -159,7 +160,7 @@ var _ = Describe("Configuration Controller", func() {
 			_, err := reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: key})
 			Expect(err).NotTo(HaveOccurred())
 
-			fullPath := filepath.Join(reconciler.ConfigurationRoot, conf.Spec.Path)
+			fullPath := filepath.Join(reconciler.ConfMgr.GetConfigurationRoot(), conf.Spec.Path)
 
 			finfo, err := os.Stat(fullPath)
 			Expect(err).NotTo(HaveOccurred(), "error Stat()ing configuration file")

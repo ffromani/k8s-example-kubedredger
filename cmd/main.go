@@ -36,6 +36,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 
 	workshopv1alpha1 "golab.io/kubedredger/api/v1alpha1"
+	"golab.io/kubedredger/internal/configfile"
 	"golab.io/kubedredger/internal/controller"
 	// +kubebuilder:scaffold:imports
 )
@@ -181,9 +182,9 @@ func main() {
 	}
 
 	if err := (&controller.ConfigurationReconciler{
-		Client:            mgr.GetClient(),
-		Scheme:            mgr.GetScheme(),
-		ConfigurationRoot: configurationRoot,
+		Client:  mgr.GetClient(),
+		Scheme:  mgr.GetScheme(),
+		ConfMgr: configfile.NewManager(configurationRoot),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Configuration")
 		os.Exit(1)
