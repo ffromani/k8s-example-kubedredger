@@ -38,6 +38,7 @@ import (
 	workshopv1alpha1 "golab.io/kubedredger/api/v1alpha1"
 	"golab.io/kubedredger/internal/configfile"
 	"golab.io/kubedredger/internal/controller"
+	"golab.io/kubedredger/internal/nodelabel"
 	// +kubebuilder:scaffold:imports
 )
 
@@ -55,6 +56,7 @@ func init() {
 
 // nolint:gocyclo
 func main() {
+	var hostname string
 	var configurationRoot string
 	var metricsAddr string
 	var metricsCertPath, metricsCertName, metricsCertKey string
@@ -64,6 +66,7 @@ func main() {
 	var secureMetrics bool
 	var enableHTTP2 bool
 	var tlsOpts []func(*tls.Config)
+	flag.StringVar(&hostname, "hostname", "", "The name of the host the program will manage. Leave blank to autodetect")
 	flag.StringVar(&configurationRoot, "configuration-root", "/etc", "The root for the configuration file path")
 	flag.StringVar(&metricsAddr, "metrics-bind-address", "0", "The address the metrics endpoint binds to. "+
 		"Use :8443 for HTTPS or :8080 for HTTP, or leave as 0 to disable the metrics service.")
@@ -87,6 +90,16 @@ func main() {
 	}
 	opts.BindFlags(flag.CommandLine)
 	flag.Parse()
+
+	var err error
+	if hostname == "" {
+		hostname, err = os.Hostname()
+		if err != nil {
+			setupLog.Error(err, "unable to detect the hostname")
+			os.Exit(1)
+		}
+	}
+	setupLog.Info("Running for host", "hostname", hostname)
 
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
 
@@ -181,10 +194,12 @@ func main() {
 		os.Exit(1)
 	}
 
+	cli := mgr.GetClient()
 	if err := (&controller.ConfigurationReconciler{
-		Client:  mgr.GetClient(),
-		Scheme:  mgr.GetScheme(),
-		ConfMgr: configfile.NewManager(configurationRoot),
+		Client:   cli,
+		Scheme:   mgr.GetScheme(),
+		ConfMgr:  configfile.NewManager(configurationRoot),
+		Labeller: nodelabel.NewManager(hostname, cli),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Configuration")
 		os.Exit(1)

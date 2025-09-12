@@ -24,6 +24,7 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/utils/ptr"
@@ -35,7 +36,12 @@ import (
 
 	workshopv1alpha1 "golab.io/kubedredger/api/v1alpha1"
 	"golab.io/kubedredger/internal/configfile"
+	"golab.io/kubedredger/internal/nodelabel"
 	"golab.io/kubedredger/internal/status"
+)
+
+const (
+	testNodeName = "test-host"
 )
 
 func NewFakeConfigurationReconciler(initObjects ...runtime.Object) (*ConfigurationReconciler, func() error, error) {
@@ -49,14 +55,17 @@ func NewFakeConfigurationReconciler(initObjects ...runtime.Object) (*Configurati
 	}
 	fakeClient := fake.NewClientBuilder().WithScheme(scheme.Scheme).WithStatusSubresource(&workshopv1alpha1.Configuration{}).WithRuntimeObjects(initObjects...).Build()
 	rec := ConfigurationReconciler{
-		Client:  fakeClient,
-		Scheme:  scheme.Scheme,
-		ConfMgr: configfile.NewManager(dir),
+		Client:   fakeClient,
+		Scheme:   scheme.Scheme,
+		ConfMgr:  configfile.NewManager(dir),
+		Labeller: nodelabel.NewManager(testNodeName, fakeClient),
 	}
 	return &rec, cleanup, nil
 }
 
 var _ = Describe("Configuration Controller", func() {
+	var testNode *v1.Node
+
 	Context("When reconciling a resource", func() {
 		var cleanup func() error
 		var reconciler *ConfigurationReconciler
@@ -65,6 +74,12 @@ var _ = Describe("Configuration Controller", func() {
 			var err error
 			reconciler, cleanup, err = NewFakeConfigurationReconciler()
 			Expect(err).ToNot(HaveOccurred())
+
+			testNode = &v1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: testNodeName,
+				},
+			}
 		})
 
 		AfterEach(func() {
@@ -72,6 +87,8 @@ var _ = Describe("Configuration Controller", func() {
 		})
 
 		It("creates the configuration from scratch", func(ctx context.Context) {
+			Expect(reconciler.Client.Create(ctx, testNode)).To(Succeed())
+
 			conf := &workshopv1alpha1.Configuration{
 				ObjectMeta: metav1.ObjectMeta{
 					Namespace: "test-namespace",
@@ -84,8 +101,8 @@ var _ = Describe("Configuration Controller", func() {
 					Permission: ptr.To[uint32](0600),
 				},
 			}
-			key := client.ObjectKeyFromObject(conf)
 			Expect(reconciler.Client.Create(ctx, conf)).To(Succeed())
+			key := client.ObjectKeyFromObject(conf)
 			_, err := reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: key})
 			Expect(err).NotTo(HaveOccurred())
 
@@ -103,7 +120,42 @@ var _ = Describe("Configuration Controller", func() {
 			Expect(verifyAvailableStatus(&updatedConf.Status)).To(Succeed())
 		})
 
+		It("creates the configuration from scratch, but stays in progress if can't update the k8s node object", func(ctx context.Context) {
+			conf := &workshopv1alpha1.Configuration{
+				ObjectMeta: metav1.ObjectMeta{
+					Namespace: "test-namespace",
+					Name:      "test-create",
+				},
+				Spec: workshopv1alpha1.ConfigurationSpec{
+					Path:       "foobar.conf",
+					Content:    "foo=bar\nbaz=42\n",
+					Create:     true,
+					Permission: ptr.To[uint32](0600),
+				},
+			}
+			Expect(reconciler.Client.Create(ctx, conf)).To(Succeed())
+			key := client.ObjectKeyFromObject(conf)
+			_, err := reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: key})
+			Expect(err).To(HaveOccurred())
+
+			updatedConf := &workshopv1alpha1.Configuration{}
+			Expect(reconciler.Client.Get(ctx, key, updatedConf)).To(Succeed())
+			Expect(verifyProgressingStatus(&updatedConf.Status)).To(Succeed())
+
+			// still should have created the file!
+			fullPath := filepath.Join(reconciler.ConfMgr.GetConfigurationRoot(), conf.Spec.Path)
+			finfo, err := os.Stat(fullPath)
+			Expect(err).NotTo(HaveOccurred(), "error Stat()ing configuration file")
+
+			Expect(uint32(finfo.Mode())).To(Equal(uint32(0600)), "error checking permissions, got %o expected %o", finfo.Mode(), 0600)
+			data, err := os.ReadFile(fullPath)
+			Expect(err).NotTo(HaveOccurred(), "error reading configuration file content")
+			Expect(string(data)).To(Equal(conf.Spec.Content), "configuration content doesn't match")
+		})
+
 		It("updates the configuration once created", func(ctx context.Context) {
+			Expect(reconciler.Client.Create(ctx, testNode)).To(Succeed())
+
 			conf := &workshopv1alpha1.Configuration{
 				ObjectMeta: metav1.ObjectMeta{
 					Namespace: "test-namespace",
@@ -156,6 +208,8 @@ var _ = Describe("Configuration Controller", func() {
 		})
 
 		It("does not create the same configuration file twice", func(ctx context.Context) {
+			Expect(reconciler.Client.Create(ctx, testNode)).To(Succeed())
+
 			origContent := "foo=bar\n"
 			conf := &workshopv1alpha1.Configuration{
 				ObjectMeta: metav1.ObjectMeta{
@@ -214,6 +268,15 @@ func verifyAvailableStatus(confStatus *workshopv1alpha1.ConfigurationStatus) err
 	}
 	if !isConditionEqual(confStatus.Conditions, status.ConditionAvailable, metav1.ConditionTrue) ||
 		!isConditionEqual(confStatus.Conditions, status.ConditionProgressing, metav1.ConditionFalse) ||
+		!isConditionEqual(confStatus.Conditions, status.ConditionDegraded, metav1.ConditionFalse) {
+		return fmt.Errorf("unexpected status conditions")
+	}
+	return nil
+}
+
+func verifyProgressingStatus(confStatus *workshopv1alpha1.ConfigurationStatus) error {
+	if !isConditionEqual(confStatus.Conditions, status.ConditionAvailable, metav1.ConditionFalse) ||
+		!isConditionEqual(confStatus.Conditions, status.ConditionProgressing, metav1.ConditionTrue) ||
 		!isConditionEqual(confStatus.Conditions, status.ConditionDegraded, metav1.ConditionFalse) {
 		return fmt.Errorf("unexpected status conditions")
 	}
