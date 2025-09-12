@@ -32,6 +32,13 @@ type Manager struct {
 	lastPath          string
 }
 
+type Result struct {
+	FileExists bool
+	Content    string
+	Error      error
+	Retryable  bool
+}
+
 func NewManager(configurationRoot string) *Manager {
 	return &Manager{
 		configurationRoot: configurationRoot,
@@ -44,7 +51,7 @@ func (mgr *Manager) GetConfigurationRoot() string {
 
 // Handle reconciles the on-disk configuration with the given spec.
 // Returns error if failed, and if so a boolean to tell if the error is retryable.
-func (mgr *Manager) Handle(lh logr.Logger, confSpec workshopv1alpha1.ConfigurationSpec) (error, bool) {
+func (mgr *Manager) Handle(lh logr.Logger, confSpec workshopv1alpha1.ConfigurationSpec) Result {
 	var err error
 	retryable := true // optimist by default
 	fullPath := filepath.Join(mgr.configurationRoot, confSpec.Path)
@@ -52,22 +59,28 @@ func (mgr *Manager) Handle(lh logr.Logger, confSpec workshopv1alpha1.Configurati
 		lh.Info("configuration path changed", "lastPath", mgr.lastPath, "path", fullPath)
 		err = os.Remove(mgr.lastPath)
 		if err != nil {
-			return err, retryable
+			return Result{
+				Error:     err,
+				Retryable: retryable,
+			}
 		}
 		lh.Info("configuration path cleaned", "path", mgr.lastPath)
 	}
 
+	res := Result{}
 	if confSpec.Create {
-		err, retryable = Create(lh, fullPath, confSpec.Content, confSpec.Permission)
+		res.Error, res.Retryable = Create(lh, fullPath, confSpec.Content, confSpec.Permission)
 	} else {
-		err, retryable = Update(lh, fullPath, confSpec.Content)
+		res.Error, res.Retryable = Update(lh, fullPath, confSpec.Content)
 	}
 
 	if err == nil {
+		res.Content = confSpec.Content
+		res.FileExists = true
 		mgr.lastPath = fullPath
 		lh.Info("configuration path registered", "path", fullPath)
 	}
-	return err, retryable
+	return res
 }
 
 // Create creates a new configfile on given `confPath` with the given `content`.

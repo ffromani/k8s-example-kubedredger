@@ -18,8 +18,11 @@ package controller
 
 import (
 	"context"
+	"fmt"
+	"time"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -28,6 +31,7 @@ import (
 
 	workshopv1alpha1 "golab.io/kubedredger/api/v1alpha1"
 	"golab.io/kubedredger/internal/configfile"
+	"golab.io/kubedredger/internal/status"
 )
 
 // ConfigurationReconciler reconciles a Configuration object
@@ -62,12 +66,38 @@ func (r *ConfigurationReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		return ctrl.Result{}, err
 	}
 
-	err, retryable := r.ConfMgr.Handle(lh, conf.Spec)
-	if err != nil && !retryable {
-		err = reconcile.TerminalError(err)
+	oldStatus := conf.Status.DeepCopy()
+
+	res := r.ConfMgr.Handle(lh, conf.Spec)
+
+	conf.Status, err = statusFromResponse(res)
+
+	if status.NeedsUpdate(oldStatus, &conf.Status) {
+		conf.Status.LastUpdated = metav1.Time{Time: time.Now()}
+		updErr := r.Client.Status().Update(ctx, &conf)
+		if updErr != nil {
+			lh.Error(updErr, "Failed to update configuration status")
+			return ctrl.Result{}, fmt.Errorf("could not update status for object %s: %w", client.ObjectKeyFromObject(&conf), updErr)
+		}
+	}
+	return ctrl.Result{}, err
+}
+
+func statusFromResponse(res configfile.Result) (workshopv1alpha1.ConfigurationStatus, error) {
+	condType := status.ConditionAvailable
+	err := res.Error
+	if res.Error != nil {
+		condType = status.ConditionDegraded
+		if !res.Retryable {
+			err = reconcile.TerminalError(res.Error)
+		}
 	}
 
-	return ctrl.Result{}, err
+	return workshopv1alpha1.ConfigurationStatus{
+		Content:    res.Content,
+		FileExists: res.FileExists,
+		Conditions: status.NewConditions(time.Now(), condType, status.ReasonFromError(res.Error), status.MessageFromError(res.Error)),
+	}, err
 }
 
 // SetupWithManager sets up the controller with the Manager.

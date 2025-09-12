@@ -18,6 +18,7 @@ package controller
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 
@@ -34,6 +35,7 @@ import (
 
 	workshopv1alpha1 "golab.io/kubedredger/api/v1alpha1"
 	"golab.io/kubedredger/internal/configfile"
+	"golab.io/kubedredger/internal/status"
 )
 
 func NewFakeConfigurationReconciler(initObjects ...runtime.Object) (*ConfigurationReconciler, func() error, error) {
@@ -95,6 +97,10 @@ var _ = Describe("Configuration Controller", func() {
 			data, err := os.ReadFile(fullPath)
 			Expect(err).NotTo(HaveOccurred(), "error reading configuration file content")
 			Expect(string(data)).To(Equal(conf.Spec.Content), "configuration content doesn't match")
+
+			updatedConf := &workshopv1alpha1.Configuration{}
+			Expect(reconciler.Client.Get(ctx, key, updatedConf)).To(Succeed())
+			Expect(verifyAvailableStatus(&updatedConf.Status)).To(Succeed())
 		})
 
 		It("updates the configuration once created", func(ctx context.Context) {
@@ -125,6 +131,11 @@ var _ = Describe("Configuration Controller", func() {
 			Expect(err).NotTo(HaveOccurred(), "error reading configuration file content")
 			Expect(string(data)).To(Equal(conf.Spec.Content), "configuration content doesn't match")
 
+			updatedConf := &workshopv1alpha1.Configuration{}
+			Expect(reconciler.Client.Get(ctx, key, updatedConf)).To(Succeed())
+			Expect(verifyAvailableStatus(&updatedConf.Status)).To(Succeed())
+
+			Expect(reconciler.Client.Get(ctx, client.ObjectKeyFromObject(conf), conf)).To(Succeed())
 			conf.Spec.Create = false
 			conf.Spec.Permission = nil
 			conf.Spec.Content = "answer=42\n"
@@ -139,6 +150,9 @@ var _ = Describe("Configuration Controller", func() {
 			data, err = os.ReadFile(fullPath)
 			Expect(err).NotTo(HaveOccurred(), "error reading configuration file content")
 			Expect(string(data)).To(Equal(conf.Spec.Content), "configuration content doesn't match")
+
+			Expect(reconciler.Client.Get(ctx, key, updatedConf)).To(Succeed())
+			Expect(verifyAvailableStatus(&updatedConf.Status)).To(Succeed())
 		})
 
 		It("does not create the same configuration file twice", func(ctx context.Context) {
@@ -170,6 +184,11 @@ var _ = Describe("Configuration Controller", func() {
 			Expect(err).NotTo(HaveOccurred(), "error reading configuration file content")
 			Expect(string(data)).To(Equal(conf.Spec.Content), "configuration content doesn't match")
 
+			updatedConf := &workshopv1alpha1.Configuration{}
+			Expect(reconciler.Client.Get(ctx, key, updatedConf)).To(Succeed())
+			Expect(verifyAvailableStatus(&updatedConf.Status)).To(Succeed())
+
+			Expect(reconciler.Client.Get(ctx, client.ObjectKeyFromObject(conf), conf)).To(Succeed())
 			conf.Spec.Content = "answer=42\n"
 			Expect(reconciler.Client.Update(ctx, conf)).To(Succeed())
 			_, err = reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: key})
@@ -182,6 +201,36 @@ var _ = Describe("Configuration Controller", func() {
 			data, err = os.ReadFile(fullPath)
 			Expect(err).NotTo(HaveOccurred(), "error reading configuration file content")
 			Expect(string(data)).To(Equal(origContent), "configuration content doesn't match")
+
+			Expect(reconciler.Client.Get(ctx, key, updatedConf)).To(Succeed())
+			Expect(verifyDegradedStatus(&updatedConf.Status)).To(Succeed())
 		})
 	})
 })
+
+func verifyAvailableStatus(confStatus *workshopv1alpha1.ConfigurationStatus) error {
+	if !confStatus.FileExists {
+		return fmt.Errorf("cannot be available without file created")
+	}
+	if !isConditionEqual(confStatus.Conditions, status.ConditionAvailable, metav1.ConditionTrue) ||
+		!isConditionEqual(confStatus.Conditions, status.ConditionProgressing, metav1.ConditionFalse) ||
+		!isConditionEqual(confStatus.Conditions, status.ConditionDegraded, metav1.ConditionFalse) {
+		return fmt.Errorf("unexpected status conditions")
+	}
+	return nil
+}
+
+func verifyDegradedStatus(confStatus *workshopv1alpha1.ConfigurationStatus) error {
+	if !isConditionEqual(confStatus.Conditions, status.ConditionAvailable, metav1.ConditionFalse) ||
+		!isConditionEqual(confStatus.Conditions, status.ConditionProgressing, metav1.ConditionFalse) ||
+		!isConditionEqual(confStatus.Conditions, status.ConditionDegraded, metav1.ConditionTrue) {
+		return fmt.Errorf("unexpected status conditions")
+	}
+	return nil
+}
+func isConditionEqual(conds []metav1.Condition, condType string, condStatus metav1.ConditionStatus) bool {
+	if cond := status.FindCondition(conds, condType); cond != nil {
+		return cond.Status == condStatus
+	}
+	return false
+}
