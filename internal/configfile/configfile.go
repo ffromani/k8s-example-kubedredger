@@ -74,27 +74,36 @@ func (mgr *Manager) Handle(lh logr.Logger, confSpec workshopv1alpha1.Configurati
 // The file must not be existing already.
 // If non-nil, `confPerm` are the unix permissions to apply, before umask.
 // Returns error if failed, and if so a boolean to tell if the error is retryable.
-func Create(lh logr.Logger, confPath string, content string, confPerm *uint32) (error, bool) {
+func Create(lh logr.Logger, confPath string, content string, confPerm *uint32) (err error, retryable bool) {
+	retryable = true
 	lh.Info("creating configuration file")
 	perm := fs.FileMode(0644)
 	if confPerm != nil {
 		perm = fs.FileMode(*confPerm)
 	}
-	file, err := os.OpenFile(confPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, perm)
+	var file *os.File
+	file, err = os.OpenFile(confPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, perm)
 	if err != nil {
 		if errors.Is(err, os.ErrExist) {
-			return fmt.Errorf("asked to create an existing path: %q", confPath), false
+			err = fmt.Errorf("asked to create an existing path: %q", confPath)
+			retryable = false
+			return
 		}
-		return fmt.Errorf("cannot open %q: %w", confPath, err), true
+		err = fmt.Errorf("cannot open %q: %w", confPath, err)
+		return
 	}
 	// File was created successfully. Write content.
-	defer file.Close()
-	if _, err = file.WriteString(content); err != nil {
+	defer func() {
+		err = file.Close()
+	}()
+	_, err = file.WriteString(content)
+	if err != nil {
 		// Clean up the partially written file on error, but keep the original error
 		_ = os.Remove(confPath)
-		return fmt.Errorf("error writing the content in %q: %w", confPath, err), true
+		err = fmt.Errorf("error writing the content in %q: %w", confPath, err)
+		return
 	}
-	return nil, false
+	return
 }
 
 // Update updates an existing configfile on given `confPath` with the given `content`.
