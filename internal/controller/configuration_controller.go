@@ -18,6 +18,7 @@ package controller
 
 import (
 	"context"
+	"crypto/sha256"
 	"fmt"
 	"time"
 
@@ -31,19 +32,22 @@ import (
 
 	workshopv1alpha1 "golab.io/kubedredger/api/v1alpha1"
 	"golab.io/kubedredger/internal/configfile"
+	"golab.io/kubedredger/internal/nodelabel"
 	"golab.io/kubedredger/internal/status"
 )
 
 // ConfigurationReconciler reconciles a Configuration object
 type ConfigurationReconciler struct {
 	client.Client
-	Scheme  *runtime.Scheme
-	ConfMgr *configfile.Manager
+	Scheme   *runtime.Scheme
+	ConfMgr  *configfile.Manager
+	Labeller *nodelabel.Manager
 }
 
 // +kubebuilder:rbac:groups=workshop.golab.io,resources=configurations,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=workshop.golab.io,resources=configurations/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=workshop.golab.io,resources=configurations/finalizers,verbs=update
+// +kubebuilder:rbac:groups="",resources=nodes,verbs=get;update;patch
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.
@@ -68,9 +72,15 @@ func (r *ConfigurationReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 
 	oldStatus := conf.Status.DeepCopy()
 
-	res := r.ConfMgr.Handle(lh, conf.Spec)
+	res := r.ConfMgr.Handle(lh, conf)
 
-	conf.Status, err = statusFromResponse(res)
+	if res.Error == nil {
+		contentHash := fmt.Sprintf("%x", sha256.Sum256([]byte(conf.Spec.Content)))
+		err = r.Labeller.Set(ctx, nodelabel.ContentHash, contentHash)
+		lh.Info("labelled node", "value", contentHash, "error", err)
+	}
+
+	conf.Status, err = buildStatus(res, err)
 
 	if status.NeedsUpdate(oldStatus, &conf.Status) {
 		conf.Status.LastUpdated = metav1.Time{Time: time.Now()}
@@ -83,7 +93,7 @@ func (r *ConfigurationReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	return ctrl.Result{}, err
 }
 
-func statusFromResponse(res configfile.Result) (workshopv1alpha1.ConfigurationStatus, error) {
+func buildStatus(res configfile.Result, nodeErr error) (workshopv1alpha1.ConfigurationStatus, error) {
 	condType := status.ConditionAvailable
 	err := res.Error
 	if res.Error != nil {
@@ -91,6 +101,12 @@ func statusFromResponse(res configfile.Result) (workshopv1alpha1.ConfigurationSt
 		if !res.Retryable {
 			err = reconcile.TerminalError(res.Error)
 		}
+	}
+
+	if res.Error == nil && nodeErr != nil {
+		condType = status.ConditionProgressing // Degraded would have been legit as well
+		res.Error = nodeErr
+		err = nodeErr
 	}
 
 	return workshopv1alpha1.ConfigurationStatus{

@@ -5,6 +5,14 @@ metadata:
   name: kubedredger-role
 rules:
 - apiGroups:
+  - ""
+  resources:
+  - nodes
+  verbs:
+  - get
+  - patch
+  - update
+- apiGroups:
   - workshop.golab.io
   resources:
   - configurations
