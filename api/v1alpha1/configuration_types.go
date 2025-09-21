@@ -37,7 +37,7 @@ type ConfigurationSpec struct {
 // ConfigurationStatus defines the observed state of Configuration.
 type ConfigurationStatus struct {
 	// LastUpdated is the last time the configuration was updated
-	LastUpdated metav1.Time `json:"lastUpdated,omitempty"`
+	LastUpdated metav1.Time `json:"lastUpdated"`
 
 	// Content is the current content of the file at the specified path
 	Content string `json:"content,omitempty"`
@@ -53,6 +53,9 @@ type ConfigurationStatus struct {
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
+// +kubebuilder:printcolumn:name="Path",type="string",JSONPath=".spec.path",description="Path of the file"
+// +kubebuilder:printcolumn:name="Exists",type="bool",JSONPath=".status.fileExists",description="Tells if the file exists"
+// +kubebuilder:printcolumn:name="LastUpdate",type="date",JSONPath=".status.lastUpdated",description="Last update of the file"
 
 // Configuration is the Schema for the configurations API
 type Configuration struct {
@@ -60,7 +63,7 @@ type Configuration struct {
 
 	// metadata is a standard object metadata
 	// +optional
-	metav1.ObjectMeta `json:"metadata,omitempty,omitzero"`
+	metav1.ObjectMeta `json:"metadata,omitzero"`
 
 	// spec defines the desired state of Configuration
 	// +required
@@ -68,7 +71,7 @@ type Configuration struct {
 
 	// status defines the observed state of Configuration
 	// +optional
-	Status ConfigurationStatus `json:"status,omitempty,omitzero"`
+	Status ConfigurationStatus `json:"status,omitzero"`
 }
 
 // +kubebuilder:object:root=true
@@ -76,7 +79,7 @@ type Configuration struct {
 // ConfigurationList contains a list of Configuration
 type ConfigurationList struct {
 	metav1.TypeMeta `json:",inline"`
-	metav1.ListMeta `json:"metadata,omitempty"`
+	metav1.ListMeta `json:"metadata"`
 	Items           []Configuration `json:"items"`
 }
 
