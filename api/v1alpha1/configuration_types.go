@@ -22,9 +22,6 @@ import (
 
 // ConfigurationSpec defines the desired state of Configuration
 type ConfigurationSpec struct {
-	// Path is the file path where the content should be written
-	Path string `json:"path,omitempty"`
-
 	// Content is the content to be written to the file
 	Content string `json:"content"`
 
@@ -54,7 +51,7 @@ type ConfigurationStatus struct {
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
 // +kubebuilder:printcolumn:name="Path",type="string",JSONPath=".spec.path",description="Path of the file"
-// +kubebuilder:printcolumn:name="Exists",type="bool",JSONPath=".status.fileExists",description="Tells if the file exists"
+// +kubebuilder:printcolumn:name="Exists",type="boolean",JSONPath=".status.fileExists",description="Tells if the file exists"
 // +kubebuilder:printcolumn:name="LastUpdate",type="date",JSONPath=".status.lastUpdated",description="Last update of the file"
 
 // Configuration is the Schema for the configurations API
