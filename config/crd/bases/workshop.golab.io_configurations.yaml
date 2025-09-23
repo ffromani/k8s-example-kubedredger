@@ -14,7 +14,20 @@ spec:
     singular: configuration
   scope: Namespaced
   versions:
-  - name: v1alpha1
+  - additionalPrinterColumns:
+    - description: Path of the file
+      jsonPath: .spec.path
+      name: Path
+      type: string
+    - description: Tells if the file exists
+      jsonPath: .status.fileExists
+      name: Exists
+      type: boolean
+    - description: Last update of the file
+      jsonPath: .status.lastUpdated
+      name: LastUpdate
+      type: date
+    name: v1alpha1
     schema:
       openAPIV3Schema:
         description: Configuration is the Schema for the configurations API
@@ -46,9 +59,6 @@ spec:
                 description: Create indicates whether to create the file if it does
                   not exist
                 type: boolean
-              path:
-                description: Path is the file path where the content should be written
-                type: string
               permission:
                 format: int32
                 type: integer
@@ -131,6 +141,8 @@ spec:
                 description: LastUpdated is the last time the configuration was updated
                 format: date-time
                 type: string
+            required:
+            - lastUpdated
             type: object
         required:
         - spec

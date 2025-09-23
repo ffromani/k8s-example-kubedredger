@@ -38,7 +38,6 @@ import (
 	workshopv1alpha1 "golab.io/kubedredger/api/v1alpha1"
 	"golab.io/kubedredger/internal/configfile"
 	"golab.io/kubedredger/internal/nodelabel"
-	"golab.io/kubedredger/internal/status"
 )
 
 const (
@@ -47,12 +46,13 @@ const (
 	confSnippet = "answer=42\n"
 )
 
-func NewFakeConfigurationReconciler(initObjects ...runtime.Object) (*ConfigurationReconciler, func() error, error) {
+func NewFakeConfigurationReconciler(initObjects ...runtime.Object) (*ConfigurationReconciler, string, func() error, error) {
 	dir, err := os.MkdirTemp("", "kubedredger-ctrl-test")
 	if err != nil {
-		return nil, func() error { return nil }, err
+		return nil, "", func() error { return nil }, err
 	}
 	GinkgoLogr.Info("created temporary directory", "path", dir)
+	configFile := filepath.Join(dir, "config.conf")
 	cleanup := func() error {
 		return os.RemoveAll(dir)
 	}
@@ -60,10 +60,10 @@ func NewFakeConfigurationReconciler(initObjects ...runtime.Object) (*Configurati
 	rec := ConfigurationReconciler{
 		Client:   fakeClient,
 		Scheme:   scheme.Scheme,
-		ConfMgr:  configfile.NewManager(dir),
+		ConfMgr:  configfile.NewManager(configFile),
 		Labeller: nodelabel.NewManager(testNodeName, fakeClient),
 	}
-	return &rec, cleanup, nil
+	return &rec, configFile, cleanup, nil
 }
 
 var _ = Describe("Configuration Controller", func() {
@@ -72,10 +72,11 @@ var _ = Describe("Configuration Controller", func() {
 	Context("When reconciling a resource", func() {
 		var cleanup func() error
 		var reconciler *ConfigurationReconciler
+		var configPath string
 
 		BeforeEach(func() {
 			var err error
-			reconciler, cleanup, err = NewFakeConfigurationReconciler()
+			reconciler, configPath, cleanup, err = NewFakeConfigurationReconciler()
 			Expect(err).ToNot(HaveOccurred())
 
 			testNode = &v1.Node{
@@ -98,7 +99,6 @@ var _ = Describe("Configuration Controller", func() {
 					Name:      "test-create",
 				},
 				Spec: workshopv1alpha1.ConfigurationSpec{
-					Path:       "foobar.conf",
 					Content:    "foo=bar\nbaz=42\n",
 					Create:     true,
 					Permission: ptr.To[uint32](0600),
@@ -109,12 +109,11 @@ var _ = Describe("Configuration Controller", func() {
 			_, err := reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: key})
 			Expect(err).NotTo(HaveOccurred())
 
-			fullPath := filepath.Join(reconciler.ConfMgr.GetConfigurationRoot(), conf.Spec.Path)
-			finfo, err := os.Stat(fullPath)
+			finfo, err := os.Stat(configPath)
 			Expect(err).NotTo(HaveOccurred(), "error Stat()ing configuration file")
 
 			Expect(uint32(finfo.Mode())).To(Equal(uint32(0600)), "error checking permissions, got %o expected %o", finfo.Mode(), 0600)
-			data, err := os.ReadFile(fullPath)
+			data, err := os.ReadFile(configPath)
 			Expect(err).NotTo(HaveOccurred(), "error reading configuration file content")
 			Expect(string(data)).To(Equal(conf.Spec.Content), "configuration content doesn't match")
 
@@ -130,7 +129,6 @@ var _ = Describe("Configuration Controller", func() {
 					Name:      "test-create",
 				},
 				Spec: workshopv1alpha1.ConfigurationSpec{
-					Path:       "foobar.conf",
 					Content:    "foo=bar\nbaz=42\n",
 					Create:     true,
 					Permission: ptr.To[uint32](0600),
@@ -146,12 +144,11 @@ var _ = Describe("Configuration Controller", func() {
 			Expect(verifyProgressingStatus(&updatedConf.Status)).To(Succeed())
 
 			// still should have created the file!
-			fullPath := filepath.Join(reconciler.ConfMgr.GetConfigurationRoot(), conf.Spec.Path)
-			finfo, err := os.Stat(fullPath)
+			finfo, err := os.Stat(configPath)
 			Expect(err).NotTo(HaveOccurred(), "error Stat()ing configuration file")
 
 			Expect(uint32(finfo.Mode())).To(Equal(uint32(0600)), "error checking permissions, got %o expected %o", finfo.Mode(), 0600)
-			data, err := os.ReadFile(fullPath)
+			data, err := os.ReadFile(configPath)
 			Expect(err).NotTo(HaveOccurred(), "error reading configuration file content")
 			Expect(string(data)).To(Equal(conf.Spec.Content), "configuration content doesn't match")
 		})
@@ -163,7 +160,6 @@ var _ = Describe("Configuration Controller", func() {
 					Name:      "test-create",
 				},
 				Spec: workshopv1alpha1.ConfigurationSpec{
-					Path:       "foobar.conf",
 					Content:    "foo=bar\nbaz=42\n",
 					Create:     true,
 					Permission: ptr.To[uint32](0600),
@@ -179,12 +175,11 @@ var _ = Describe("Configuration Controller", func() {
 			Expect(verifyProgressingStatus(&updatedConf.Status)).To(Succeed())
 
 			// still should have created the file!
-			fullPath := filepath.Join(reconciler.ConfMgr.GetConfigurationRoot(), conf.Spec.Path)
-			finfo, err := os.Stat(fullPath)
+			finfo, err := os.Stat(configPath)
 			Expect(err).NotTo(HaveOccurred(), "error Stat()ing configuration file")
 
 			Expect(uint32(finfo.Mode())).To(Equal(uint32(0600)), "error checking permissions, got %o expected %o", finfo.Mode(), 0600)
-			data, err := os.ReadFile(fullPath)
+			data, err := os.ReadFile(configPath)
 			Expect(err).NotTo(HaveOccurred(), "error reading configuration file content")
 			Expect(string(data)).To(Equal(conf.Spec.Content), "configuration content doesn't match")
 
@@ -196,11 +191,11 @@ var _ = Describe("Configuration Controller", func() {
 
 			_, err = reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: key})
 			Expect(err).ToNot(HaveOccurred())
-			finfo, err = os.Stat(fullPath)
+			finfo, err = os.Stat(configPath)
 			Expect(err).NotTo(HaveOccurred(), "error Stat()ing configuration file")
 
 			Expect(uint32(finfo.Mode())).To(Equal(uint32(0600)), "error checking permissions, got %o expected %o", finfo.Mode(), 0600)
-			data, err = os.ReadFile(fullPath)
+			data, err = os.ReadFile(configPath)
 			Expect(err).NotTo(HaveOccurred(), "error reading configuration file content")
 			Expect(string(data)).To(Equal(conf.Spec.Content), "configuration content doesn't match")
 
@@ -219,7 +214,6 @@ var _ = Describe("Configuration Controller", func() {
 					Name:      "test-create",
 				},
 				Spec: workshopv1alpha1.ConfigurationSpec{
-					Path:       "foobar.conf",
 					Content:    "foo=bar\n",
 					Create:     true,
 					Permission: ptr.To[uint32](0600),
@@ -230,13 +224,11 @@ var _ = Describe("Configuration Controller", func() {
 			_, err := reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: key})
 			Expect(err).NotTo(HaveOccurred())
 
-			fullPath := filepath.Join(reconciler.ConfMgr.GetConfigurationRoot(), conf.Spec.Path)
-
-			finfo, err := os.Stat(fullPath)
+			finfo, err := os.Stat(configPath)
 			Expect(err).NotTo(HaveOccurred(), "error Stat()ing configuration file")
 			Expect(uint32(finfo.Mode())).To(Equal(uint32(0600)), "error checking permissions, got %o expected %o", finfo.Mode(), 0600)
 
-			data, err := os.ReadFile(fullPath)
+			data, err := os.ReadFile(configPath)
 			Expect(err).NotTo(HaveOccurred(), "error reading configuration file content")
 			Expect(string(data)).To(Equal(conf.Spec.Content), "configuration content doesn't match")
 
@@ -252,11 +244,11 @@ var _ = Describe("Configuration Controller", func() {
 			_, err = reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: key})
 			Expect(err).NotTo(HaveOccurred())
 
-			finfo2, err := os.Stat(fullPath)
+			finfo2, err := os.Stat(configPath)
 			Expect(err).NotTo(HaveOccurred(), "error Stat()ing configuration file")
-			Expect(uint32(finfo2.Mode())).To(Equal(uint32(0600)), "error checking permissions, got %o expected %o", finfo2.Mode(), 0600)
+			Expect(uint32(finfo2.Mode())).To(Equal(uint32(0644)), "error checking permissions, got %o expected %o", finfo2.Mode(), 0644)
 
-			data, err = os.ReadFile(fullPath)
+			data, err = os.ReadFile(configPath)
 			Expect(err).NotTo(HaveOccurred(), "error reading configuration file content")
 			Expect(string(data)).To(Equal(conf.Spec.Content), "configuration content doesn't match")
 
@@ -275,7 +267,6 @@ var _ = Describe("Configuration Controller", func() {
 					Name:      "test-create",
 				},
 				Spec: workshopv1alpha1.ConfigurationSpec{
-					Path:       "foobar.conf",
 					Content:    origContent,
 					Create:     true,
 					Permission: ptr.To[uint32](0600),
@@ -286,13 +277,11 @@ var _ = Describe("Configuration Controller", func() {
 			_, err := reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: key})
 			Expect(err).NotTo(HaveOccurred())
 
-			fullPath := filepath.Join(reconciler.ConfMgr.GetConfigurationRoot(), conf.Spec.Path)
-
-			finfo, err := os.Stat(fullPath)
+			finfo, err := os.Stat(configPath)
 			Expect(err).NotTo(HaveOccurred(), "error Stat()ing configuration file")
 			Expect(uint32(finfo.Mode())).To(Equal(uint32(0600)), "error checking permissions, got %o expected %o", finfo.Mode(), 0600)
 
-			data, err := os.ReadFile(fullPath)
+			data, err := os.ReadFile(configPath)
 			Expect(err).NotTo(HaveOccurred(), "error reading configuration file content")
 			Expect(string(data)).To(Equal(conf.Spec.Content), "configuration content doesn't match")
 
@@ -304,18 +293,18 @@ var _ = Describe("Configuration Controller", func() {
 			conf.Spec.Content = confSnippet
 			Expect(reconciler.Client.Update(ctx, conf)).To(Succeed())
 			_, err = reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: key})
-			Expect(err).To(HaveOccurred())
+			Expect(err).NotTo(HaveOccurred())
 
-			finfo2, err := os.Stat(fullPath)
+			finfo2, err := os.Stat(configPath)
 			Expect(err).NotTo(HaveOccurred(), "error Stat()ing configuration file")
 			Expect(uint32(finfo2.Mode())).To(Equal(uint32(0600)), "error checking permissions, got %o expected %o", finfo2.Mode(), 0600)
 
-			data, err = os.ReadFile(fullPath)
+			data, err = os.ReadFile(configPath)
 			Expect(err).NotTo(HaveOccurred(), "error reading configuration file content")
-			Expect(string(data)).To(Equal(origContent), "configuration content doesn't match")
+			Expect(string(data)).To(Equal(confSnippet), "configuration content doesn't match")
 
 			Expect(reconciler.Client.Get(ctx, key, updatedConf)).To(Succeed())
-			Expect(verifyDegradedStatus(&updatedConf.Status)).To(Succeed())
+			Expect(verifyAvailableStatus(&updatedConf.Status)).To(Succeed())
 		})
 
 		It("updates the configuration once created multiple times", func(ctx context.Context) {
@@ -327,7 +316,6 @@ var _ = Describe("Configuration Controller", func() {
 					Name:      "test-create",
 				},
 				Spec: workshopv1alpha1.ConfigurationSpec{
-					Path:       "foobar.conf",
 					Content:    "foo=bar\n",
 					Create:     true,
 					Permission: ptr.To[uint32](0600),
@@ -338,13 +326,11 @@ var _ = Describe("Configuration Controller", func() {
 			_, err := reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: key})
 			Expect(err).NotTo(HaveOccurred())
 
-			fullPath := filepath.Join(reconciler.ConfMgr.GetConfigurationRoot(), conf.Spec.Path)
-
-			finfo, err := os.Stat(fullPath)
+			finfo, err := os.Stat(configPath)
 			Expect(err).NotTo(HaveOccurred(), "error Stat()ing configuration file")
 			Expect(uint32(finfo.Mode())).To(Equal(uint32(0600)), "error checking permissions, got %o expected %o", finfo.Mode(), 0600)
 
-			data, err := os.ReadFile(fullPath)
+			data, err := os.ReadFile(configPath)
 			Expect(err).NotTo(HaveOccurred(), "error reading configuration file content")
 			Expect(string(data)).To(Equal(conf.Spec.Content), "configuration content doesn't match")
 
@@ -360,11 +346,11 @@ var _ = Describe("Configuration Controller", func() {
 			_, err = reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: key})
 			Expect(err).NotTo(HaveOccurred())
 
-			finfo2, err := os.Stat(fullPath)
+			finfo2, err := os.Stat(configPath)
 			Expect(err).NotTo(HaveOccurred(), "error Stat()ing configuration file")
-			Expect(uint32(finfo2.Mode())).To(Equal(uint32(0600)), "error checking permissions, got %o expected %o", finfo2.Mode(), 0600)
+			Expect(uint32(finfo2.Mode())).To(Equal(uint32(0644)), "error checking permissions, got %o expected %o", finfo2.Mode(), 0644)
 
-			data, err = os.ReadFile(fullPath)
+			data, err = os.ReadFile(configPath)
 			Expect(err).NotTo(HaveOccurred(), "error reading configuration file content")
 			Expect(string(data)).To(Equal(conf.Spec.Content), "configuration content doesn't match")
 
@@ -380,11 +366,11 @@ var _ = Describe("Configuration Controller", func() {
 			_, err = reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: key})
 			Expect(err).NotTo(HaveOccurred())
 
-			finfo2, err = os.Stat(fullPath)
+			finfo2, err = os.Stat(configPath)
 			Expect(err).NotTo(HaveOccurred(), "error Stat()ing configuration file")
-			Expect(uint32(finfo2.Mode())).To(Equal(uint32(0600)), "error checking permissions, got %o expected %o", finfo2.Mode(), 0600)
+			Expect(uint32(finfo2.Mode())).To(Equal(uint32(0644)), "error checking permissions, got %o expected %o", finfo2.Mode(), 0644)
 
-			data, err = os.ReadFile(fullPath)
+			data, err = os.ReadFile(configPath)
 			Expect(err).NotTo(HaveOccurred(), "error reading configuration file content")
 			Expect(string(data)).To(Equal(conf.Spec.Content), "configuration content doesn't match")
 
@@ -399,38 +385,31 @@ func verifyAvailableStatus(confStatus *workshopv1alpha1.ConfigurationStatus) err
 	if !confStatus.FileExists {
 		return fmt.Errorf("cannot be available without file created")
 	}
-	if !isConditionEqual(confStatus.Conditions, status.ConditionAvailable, metav1.ConditionTrue) ||
-		!isConditionEqual(confStatus.Conditions, status.ConditionProgressing, metav1.ConditionFalse) ||
-		!isConditionEqual(confStatus.Conditions, status.ConditionDegraded, metav1.ConditionFalse) {
+	if !isConditionEqual(confStatus.Conditions, ConditionAvailable, metav1.ConditionTrue) ||
+		!isConditionEqual(confStatus.Conditions, ConditionProgressing, metav1.ConditionFalse) ||
+		!isConditionEqual(confStatus.Conditions, ConditionDegraded, metav1.ConditionFalse) {
 		return fmt.Errorf("unexpected status conditions")
 	}
 	return nil
 }
 
 func verifyProgressingStatus(confStatus *workshopv1alpha1.ConfigurationStatus) error {
-	if !isConditionEqual(confStatus.Conditions, status.ConditionAvailable, metav1.ConditionFalse) ||
-		!isConditionEqual(confStatus.Conditions, status.ConditionProgressing, metav1.ConditionTrue) ||
-		!isConditionEqual(confStatus.Conditions, status.ConditionDegraded, metav1.ConditionFalse) {
+	if !isConditionEqual(confStatus.Conditions, ConditionAvailable, metav1.ConditionFalse) ||
+		!isConditionEqual(confStatus.Conditions, ConditionProgressing, metav1.ConditionTrue) ||
+		!isConditionEqual(confStatus.Conditions, ConditionDegraded, metav1.ConditionFalse) {
 		return fmt.Errorf("unexpected status conditions")
 	}
 	return nil
 }
 
-func verifyDegradedStatus(confStatus *workshopv1alpha1.ConfigurationStatus) error {
-	if !isConditionEqual(confStatus.Conditions, status.ConditionAvailable, metav1.ConditionFalse) ||
-		!isConditionEqual(confStatus.Conditions, status.ConditionProgressing, metav1.ConditionFalse) ||
-		!isConditionEqual(confStatus.Conditions, status.ConditionDegraded, metav1.ConditionTrue) {
-		return fmt.Errorf("unexpected status conditions")
-	}
-	return nil
-}
 func isConditionEqual(conds []metav1.Condition, condType string, condStatus metav1.ConditionStatus) bool {
-	if cond := status.FindCondition(conds, condType); cond != nil {
-		return cond.Status == condStatus
+	for _, cond := range conds {
+		if cond.Type == condType {
+			return cond.Status == condStatus
+		}
 	}
 	return false
 }
-
 func verifyNodeIsLabelled(ctx context.Context, cli client.Client, nodeName string) error {
 	var updatedNode v1.Node
 	if err := cli.Get(ctx, client.ObjectKey{Name: nodeName}, &updatedNode); err != nil {
