@@ -19,21 +19,18 @@ package controller
 import (
 	"context"
 	"crypto/sha256"
+	"errors"
 	"fmt"
-	"time"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
-	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	workshopv1alpha1 "golab.io/kubedredger/api/v1alpha1"
 	"golab.io/kubedredger/internal/configfile"
 	"golab.io/kubedredger/internal/nodelabel"
-	"golab.io/kubedredger/internal/status"
 )
 
 // ConfigurationReconciler reconciles a Configuration object
@@ -59,31 +56,39 @@ func (r *ConfigurationReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 
 	conf := workshopv1alpha1.Configuration{}
 	err := r.Get(ctx, req.NamespacedName, &conf)
-	if err != nil {
-		if apierrors.IsNotFound(err) {
-			// Request object not found, could have been deleted after reconcile request.
-			// Owned objects are automatically garbage collected. For additional cleanup logic use finalizers.
-			// Return and don't requeue
-			return ctrl.Result{}, nil
+	if apierrors.IsNotFound(err) {
+		if err := r.ConfMgr.Delete(); err != nil {
+			return ctrl.Result{}, fmt.Errorf("failed to delete the configuration: %w", err)
 		}
+		return ctrl.Result{}, nil
+	}
+
+	if err != nil {
 		// Error reading the object - requeue the request.
 		return ctrl.Result{}, err
 	}
 
 	oldStatus := conf.Status.DeepCopy()
+	configurationRequest := configurationRequestFromSpec(conf.Spec)
 
-	res := r.ConfMgr.Handle(lh, conf)
-
-	if res.Error == nil {
-		contentHash := fmt.Sprintf("%x", sha256.Sum256([]byte(conf.Spec.Content)))
-		err = r.Labeller.Set(ctx, nodelabel.ContentHash, contentHash)
-		lh.Info("labelled node", "value", contentHash, "error", err)
+	err = r.ConfMgr.HandleSync(lh, configurationRequest)
+	if errors.As(err, &configfile.NonRecoverableError{}) {
+		lh.Error(err, "Non-recoverable error handling configuration")
+		return ctrl.Result{}, nil
 	}
 
-	conf.Status, err = buildStatus(res, err)
+	contentHash := fmt.Sprintf("%x", sha256.Sum256([]byte(conf.Spec.Content)))
+	err = r.Labeller.Set(ctx, nodelabel.ContentHash, contentHash)
+	lh.Info("labelled node", "value", contentHash, "error", err)
 
-	if status.NeedsUpdate(oldStatus, &conf.Status) {
-		conf.Status.LastUpdated = metav1.Time{Time: time.Now()}
+	confStatus := r.ConfMgr.Status()
+	contentLabel, err := r.Labeller.GetContentHashLabel(ctx)
+	if err != nil {
+		lh.Error(err, "could not get content hash label")
+	}
+	conf.Status = statusFromConfStatus(conf.Spec, confStatus, contentLabel)
+
+	if !statusesAreEqual(oldStatus, &conf.Status) {
 		updErr := r.Client.Status().Update(ctx, &conf)
 		if updErr != nil {
 			lh.Error(updErr, "Failed to update configuration status")
@@ -91,29 +96,6 @@ func (r *ConfigurationReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		}
 	}
 	return ctrl.Result{}, err
-}
-
-func buildStatus(res configfile.Result, nodeErr error) (workshopv1alpha1.ConfigurationStatus, error) {
-	condType := status.ConditionAvailable
-	err := res.Error
-	if res.Error != nil {
-		condType = status.ConditionDegraded
-		if !res.Retryable {
-			err = reconcile.TerminalError(res.Error)
-		}
-	}
-
-	if res.Error == nil && nodeErr != nil {
-		condType = status.ConditionProgressing // Degraded would have been legit as well
-		res.Error = nodeErr
-		err = nodeErr
-	}
-
-	return workshopv1alpha1.ConfigurationStatus{
-		Content:    res.Content,
-		FileExists: res.FileExists,
-		Conditions: status.NewConditions(time.Now(), condType, status.ReasonFromError(res.Error), status.MessageFromError(res.Error)),
-	}, err
 }
 
 // SetupWithManager sets up the controller with the Manager.
