@@ -17,145 +17,142 @@ limitations under the License.
 package configfile
 
 import (
-	"errors"
 	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/go-logr/logr"
-	workshopv1alpha1 "golab.io/kubedredger/api/v1alpha1"
 )
 
+const DefaultPermission = 644
+
+type ConfigurationStatus struct {
+	LastWriteFailed bool
+	LastWriteError  string
+	FileExists      bool
+	Content         string
+	FileUpdated     time.Time
+}
+
 type Manager struct {
-	configurationRoot string
-	lastPath          string
+	path            string
+	lastWriteFailed bool
+	lastWriteError  string
 }
 
-type Result struct {
-	FileExists bool
-	Content    string
-	Error      error
-	Retryable  bool
-}
-
-func NewManager(configurationRoot string) *Manager {
+func NewManager(configurationPath string) *Manager {
 	return &Manager{
-		configurationRoot: configurationRoot,
+		path: configurationPath,
 	}
 }
 
-func (mgr *Manager) GetConfigurationRoot() string {
-	return mgr.configurationRoot
+type NonRecoverableError struct {
+	msg string
+}
+
+func (e NonRecoverableError) Error() string {
+	return e.msg
+}
+
+type ConfigRequest struct {
+	Content    string
+	Create     bool
+	Permission *uint32
+}
+
+func (mgr *Manager) HandleSync(lh logr.Logger, request ConfigRequest) error {
+	err := mgr.handle(lh, request)
+	if err != nil {
+		mgr.lastWriteError = err.Error()
+		mgr.lastWriteFailed = true
+		return err
+	}
+	mgr.lastWriteError = ""
+	mgr.lastWriteFailed = false
+	return nil
 }
 
 // Handle reconciles the on-disk configuration with the given spec.
-// Returns error if failed, and if so a boolean to tell if the error is retryable.
-func (mgr *Manager) Handle(lh logr.Logger, conf workshopv1alpha1.Configuration) Result {
-	var err error
-	retryable := true // optimist by default
-	fullPath := filepath.Join(mgr.configurationRoot, conf.Spec.Path)
-
-	if mgr.lastPath != "" && mgr.lastPath == fullPath && conf.Spec.Content == conf.Status.Content {
-		// nothing seems to have been changed, so we are retrying the last operation
-		return Result{
-			FileExists: true,
-			Content:    conf.Spec.Content,
-		}
+func (mgr *Manager) handle(lh logr.Logger, request ConfigRequest) error {
+	content := request.Content
+	exists, err := fileExists(mgr.path)
+	if err != nil {
+		return fmt.Errorf("failed to check if file exists: %w", err)
 	}
 
-	if mgr.lastPath != "" && mgr.lastPath != fullPath {
-		lh.Info("configuration path changed", "lastPath", mgr.lastPath, "path", fullPath)
-		err = os.Remove(mgr.lastPath)
-		if err != nil {
-			return Result{
-				Error:     err,
-				Retryable: retryable,
-			}
-		}
-		lh.Info("configuration path cleaned", "path", mgr.lastPath)
+	if !exists && !request.Create {
+		return NonRecoverableError{msg: fmt.Sprintf("file %q does not exist and creation is not allowed", mgr.path)}
 	}
 
-	res := Result{}
-	if conf.Spec.Create {
-		res.Error, res.Retryable = Create(lh, fullPath, conf.Spec.Content, conf.Spec.Permission)
-	} else {
-		res.Error, res.Retryable = Update(lh, fullPath, conf.Spec.Content)
+	lh.Info("creating temporary configuration file")
+
+	tmpFile, err := os.CreateTemp(filepath.Dir(mgr.path), "kubedredger-")
+	if err != nil {
+		return fmt.Errorf("failed to create temporary file: %w", err)
+	}
+	defer func() {
+		_ = os.Remove(tmpFile.Name())
+	}()
+
+	lh.Info("updating temporary configuration file")
+	if _, err := tmpFile.WriteString(content); err != nil {
+		return fmt.Errorf("failed to write to temporary file: %w", err)
 	}
 
-	if err == nil {
-		res.Content = conf.Spec.Content
-		res.FileExists = true
-		mgr.lastPath = fullPath
-		lh.Info("configuration path registered", "path", fullPath)
+	perm := fs.FileMode(0644)
+	if request.Permission != nil {
+		perm = fs.FileMode(*request.Permission)
 	}
+	fmt.Println("FEDE setting permissions", perm)
+	if err := tmpFile.Chmod(perm); err != nil {
+		return fmt.Errorf("failed to set permissions on temporary file: %w", err)
+	}
+	if err := tmpFile.Close(); err != nil {
+		return fmt.Errorf("failed to close temporary file: %w", err)
+	}
+	if err := os.Rename(tmpFile.Name(), mgr.path); err != nil {
+		return fmt.Errorf("failed to rename temporary file: %w", err)
+	}
+
+	return nil
+}
+
+// Delete removes the configuration file at the manager's path.
+func (mgr *Manager) Delete() error {
+	err := os.Remove(mgr.path)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("failed to delete file %q: %w", mgr.path, err)
+	}
+	return nil
+}
+
+func (mgr *Manager) Status() ConfigurationStatus {
+	res := ConfigurationStatus{
+		LastWriteFailed: mgr.lastWriteFailed,
+		LastWriteError:  mgr.lastWriteError,
+	}
+	content, err := os.ReadFile(mgr.path)
+	if os.IsNotExist(err) {
+		res.FileExists = false
+		return res
+	}
+	res.FileExists = true
+	res.Content = string(content)
 	return res
 }
 
-// Create creates a new configfile on given `confPath` with the given `content`.
-// The file must not be existing already.
-// If non-nil, `confPerm` are the unix permissions to apply, before umask.
-// Returns error if failed, and if so a boolean to tell if the error is retryable.
-func Create(lh logr.Logger, confPath string, content string, confPerm *uint32) (err error, retryable bool) {
-	retryable = true
-	lh.Info("creating configuration file")
-	perm := fs.FileMode(0644)
-	if confPerm != nil {
-		perm = fs.FileMode(*confPerm)
+func fileExists(filePath string) (bool, error) {
+	_, err := os.Stat(filePath)
+	if err == nil {
+		return true, nil
 	}
-	var file *os.File
-	file, err = os.OpenFile(confPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, perm)
-	if err != nil {
-		if errors.Is(err, os.ErrExist) {
-			err = fmt.Errorf("asked to create an existing path: %q", confPath)
-			retryable = false
-			return
-		}
-		err = fmt.Errorf("cannot open %q: %w", confPath, err)
-		return
+	if os.IsNotExist(err) {
+		return false, nil
 	}
-	// File was created successfully. Write content.
-	defer func() {
-		err = file.Close()
-	}()
-	_, err = file.WriteString(content)
-	if err != nil {
-		// Clean up the partially written file on error, but keep the original error
-		_ = os.Remove(confPath)
-		err = fmt.Errorf("error writing the content in %q: %w", confPath, err)
-		return
-	}
-	return
-}
-
-// Update updates an existing configfile on given `confPath` with the given `content`.
-// The function does not check if the file exists already.
-// If non-nil, `confPerm` are the unix permissions to apply, before umask.
-// Returns error if failed, and if so a boolean to tell if the error is retryable.
-func Update(lh logr.Logger, confPath string, content string) (uerr error, retryable bool) {
-	retryable = true // always retryable
-	lh.Info("updating configuration file")
-	tmpFile, err := os.CreateTemp(filepath.Dir(confPath), "kubedredger-")
-	if err != nil {
-		uerr = fmt.Errorf("failed to create temporary file: %w", err)
-		return
-	}
-	defer func() {
-		if err != nil {
-			_ = os.Remove(tmpFile.Name())
-		}
-	}()
-	if _, err := tmpFile.WriteString(content); err != nil {
-		uerr = fmt.Errorf("failed to write to temporary file: %w", err)
-		return
-	}
-	if err := tmpFile.Close(); err != nil {
-		uerr = fmt.Errorf("failed to close temporary file: %w", err)
-		return
-	}
-	if err := os.Rename(tmpFile.Name(), confPath); err != nil {
-		uerr = fmt.Errorf("failed to rename temporary file: %w", err)
-		return
-	}
-	return
+	return false, fmt.Errorf("error checking existence of %s: %w", filePath, err)
 }
