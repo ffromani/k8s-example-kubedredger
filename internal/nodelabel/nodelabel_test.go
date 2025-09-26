@@ -31,6 +31,99 @@ import (
 	workshopv1alpha1 "golab.io/kubedredger/api/v1alpha1"
 )
 
+func TestManagerGet(t *testing.T) {
+	type testCase struct {
+		name            string
+		node            *v1.Node
+		nodeName        string
+		labelKey        string
+		expectedValue   string
+		expectedOK      bool
+		expectedSuccess bool
+	}
+
+	testCases := []testCase{
+		{
+			name:            "no node",
+			nodeName:        "test-node",
+			labelKey:        "myCustomKey",
+			expectedSuccess: false,
+		},
+		{
+			name: "no labels",
+			node: &v1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-node",
+				},
+			},
+			nodeName:        "test-node",
+			labelKey:        "myCustomKey",
+			expectedSuccess: true,
+			expectedOK:      false,
+		},
+		{
+			name: "missing label",
+			node: &v1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-node",
+					Labels: map[string]string{
+						"foo-label": "bar",
+					},
+				},
+			},
+			nodeName:        "test-node",
+			labelKey:        "myCustomKey",
+			expectedSuccess: true,
+			expectedOK:      false,
+		},
+		{
+			name: "found label",
+			node: &v1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-node",
+					Labels: map[string]string{
+						"myCustomKey": "VAL",
+					},
+				},
+			},
+
+			nodeName:        "test-node",
+			labelKey:        "myCustomKey",
+			expectedSuccess: true,
+			expectedOK:      true,
+			expectedValue:   "VAL",
+		},
+	}
+
+	err := workshopv1alpha1.AddToScheme(scheme.Scheme)
+	if err != nil {
+		t.Fatalf("cannot register to scheme: %v", err)
+	}
+
+	for _, tcase := range testCases {
+		t.Run(tcase.name, func(t *testing.T) {
+			var cli client.Client
+			if tcase.node != nil {
+				cli = newFakeClient(tcase.node)
+			} else {
+				cli = newFakeClient()
+			}
+			mgr := NewManager(tcase.nodeName, cli)
+			val, ok, err := mgr.Get(context.TODO(), tcase.labelKey)
+			success := (err == nil)
+			if success != tcase.expectedSuccess {
+				t.Fatalf("unexpected status. wants=%v got=%v err=%v", tcase.expectedSuccess, success, err)
+			}
+			if ok != tcase.expectedOK {
+				t.Errorf("ok got=%v expected=%v", ok, tcase.expectedOK)
+			}
+			if val != tcase.expectedValue {
+				t.Errorf("value got=%v expected=%v", val, tcase.expectedValue)
+			}
+		})
+	}
+}
+
 func TestManagerSet(t *testing.T) {
 	type testCase struct {
 		name       string
