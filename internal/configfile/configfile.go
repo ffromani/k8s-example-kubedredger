@@ -74,7 +74,7 @@ func (mgr *Manager) HandleSync(lh logr.Logger, request ConfigRequest) error {
 	return nil
 }
 
-// Handle reconciles the on-disk configuration with the given spec.
+// Handle reconciles the on-disk configuration with the given request.
 func (mgr *Manager) handle(lh logr.Logger, request ConfigRequest) error {
 	content := request.Content
 	exists, err := fileExists(mgr.path)
@@ -105,10 +105,12 @@ func (mgr *Manager) handle(lh logr.Logger, request ConfigRequest) error {
 	if request.Permission != nil {
 		perm = fs.FileMode(*request.Permission)
 	}
-	fmt.Println("FEDE setting permissions", perm)
+	lh.Info("setting permissions", "perms", perm)
 	if err := tmpFile.Chmod(perm); err != nil {
 		return fmt.Errorf("failed to set permissions on temporary file: %w", err)
 	}
+
+	lh.Info("finalizing file content")
 	if err := tmpFile.Close(); err != nil {
 		return fmt.Errorf("failed to close temporary file: %w", err)
 	}
@@ -116,6 +118,7 @@ func (mgr *Manager) handle(lh logr.Logger, request ConfigRequest) error {
 		return fmt.Errorf("failed to rename temporary file: %w", err)
 	}
 
+	lh.Info("configuration updated")
 	return nil
 }
 
