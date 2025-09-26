@@ -19,12 +19,18 @@ jobs:
 
       - name: Install the latest version of kind
         run: |
-          curl -Lo ./kind https://kind.sigs.k8s.io/dl/latest/kind-linux-amd64
-          chmod +x ./kind
-          sudo mv ./kind /usr/local/bin/kind
+          make dep-install-kind
+          make dep-install-kubectl
 
-      - name: Verify kind installation
-        run: kind version
+      - name: Verify local versions
+        run: |
+          bin/kind version
+          bin/kubectl version
+
+      - name: Setup cluster
+        run: |
+          make kind-setup
+          make kind-load-image
 
       - name: Running Test e2e
         run: |

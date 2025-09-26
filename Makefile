@@ -1,8 +1,13 @@
 OS=$(shell go env GOOS)
 ARCH=$(shell go env GOARCH)
 
+GIT_VERSION := $(shell date +v%Y%m%d)-$(shell git rev-parse --short HEAD)
+ifneq ($(shell git status --porcelain),)
+	GIT_VERSION := $(GIT_VERSION)-dirty
+endif
+TAG ?= $(GIT_VERSION)
 # Image URL to use all building/pushing image targets
-IMG ?= controller:latest
+IMG ?= localhost.dev/controller:$(TAG)
 
 # Get the currently used golang install path (in GOPATH/bin, unless GOBIN is set)
 ifeq (,$(shell go env GOBIN))
@@ -40,7 +45,7 @@ all: build
 
 .PHONY: help
 help: ## Display this help.
-	@awk 'BEGIN {FS = ":.*##"; printf "\nUsage:\n  make \033[36m<target>\033[0m\n"} /^[a-zA-Z_0-9-]+:.*?##/ { printf "  \033[36m%-15s\033[0m %s\n", $$1, $$2 } /^##@/ { printf "\n\033[1m%s\033[0m\n", substr($$0, 5) } ' $(MAKEFILE_LIST)
+	@awk 'BEGIN {FS = ":.*##"; printf "\nUsage:\n  make \033[36m<target>\033[0m\n"} /^[a-zA-Z_0-9-]+:.*?##/ { printf "  \033[36m%-23s\033[0m %s\n", $$1, $$2 } /^##@/ { printf "\n\033[1m%s\033[0m\n", substr($$0, 5) } ' $(MAKEFILE_LIST)
 
 ##@ Development
 
@@ -64,11 +69,8 @@ vet: ## Run go vet against code.
 test: manifests generate fmt vet setup-envtest ## Run tests.
 	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(LOCALBIN) -p path)" go test $$(go list ./... | grep -v /e2e) -coverprofile cover.out
 
-# TODO(user): To use a different vendor for e2e tests, modify the setup under 'tests/e2e'.
-# The default setup assumes Kind is pre-installed and builds/loads the Manager Docker image locally.
-# CertManager is installed by default; skip with:
-# - CERT_MANAGER_INSTALL_SKIP=true
-KIND_CLUSTER ?= k8s-example-kubedredger-test-e2e
+#KIND_CLUSTER ?= k8s-example-kubedredger-test-e2e
+KIND_CLUSTER ?= k8s-example-kubedredger-kind
 
 .PHONY: setup-test-e2e
 setup-test-e2e: ## Set up a Kind cluster for e2e tests if it does not exist
@@ -196,7 +198,7 @@ CONTROLLER_TOOLS_VERSION ?= v0.18.0
 ENVTEST_VERSION ?= $(shell go list -m -f "{{ .Version }}" sigs.k8s.io/controller-runtime | awk -F'[v.]' '{printf "release-%d.%d", $$2, $$3}')
 #ENVTEST_K8S_VERSION is the version of Kubernetes to use for setting up ENVTEST binaries (i.e. 1.31)
 ENVTEST_K8S_VERSION ?= $(shell go list -m -f "{{ .Version }}" k8s.io/api | awk -F'[v.]' '{printf "1.%d", $$3}')
-GOLANGCI_LINT_VERSION ?= v2.3.0
+GOLANGCI_LINT_VERSION ?= 2.3.0
 
 .PHONY: kustomize
 kustomize: $(KUSTOMIZE) ## Download kustomize locally if necessary.
@@ -223,30 +225,82 @@ $(ENVTEST): $(LOCALBIN)
 
 .PHONY: golangci-lint
 golangci-lint: $(GOLANGCI_LINT) ## Download golangci-lint locally if necessary.
-$(GOLANGCI_LINT): $(LOCALBIN)
-	$(call go-install-tool,$(GOLANGCI_LINT),github.com/golangci/golangci-lint/v2/cmd/golangci-lint,$(GOLANGCI_LINT_VERSION))
+$(GOLANGCI_LINT): dep-install-golangci-lint
+#$(GOLANGCI_LINT): $(LOCALBIN)
+#	$(call go-install-tool,$(GOLANGCI_LINT),github.com/golangci/golangci-lint/v2/cmd/golangci-lint,v$(GOLANGCI_LINT_VERSION))
+
+##@ Workshop-specific helpers
 
 # extra deps
-.PHONY: kubectl
-kubectl: $(KUBECTL) ## Download kubectl locally if necessary.
+.PHONY: dep-install-kubectl
+dep-install-kubectl: $(KUBECTL) ## Download kubectl locally if necessary, or reuse the system binary.
 $(KUBECTL): $(LOCALBIN)
-	@command -v $(KUBECTL) >/dev/null 2>&1 || { \
-		curl -sSL "https://dl.k8s.io/release/$(KUBECTL VERSION)/bin/$(OS)/$(ARCH)/kubectl" -o $(KUBECTL)-v$(KUBECTL_VERSION) ;\
+	@command -v kubectl >/dev/null 2>&1 && { \
+		ln -sf $(shell command -v kubectl ) $(LOCALBIN) ;\
+		echo "reusing system kubectl" ;\
+	} || { \
+		curl -sSL "https://dl.k8s.io/release/$(KUBECTL_VERSION)/bin/$(OS)/$(ARCH)/kubectl" -o $(KUBECTL)-v$(KUBECTL_VERSION) ;\
 		chmod 0755 $(KUBECTL)-v$(KUBECTL_VERSION) ;\
 		ln -sf $(KUBECTL)-v$(KUBECTL_VERSION) $(KUBECTL) ;\
 		echo "downloaded $(shell basename $(KUBECTL)) $(KUBECTL_VERSION) in $(LOCALBIN)" ;\
 	}
 
-.PHONY: kind
-kind: $(KIND) ## Download kind locally if necessary.
+.PHONY: dep-install-golangci-lint
+dep-install-golangci-lint: $(LOCALBIN)  ## Download golangci-lint locally if necessary, or reuse the system binary
+	@[ ! -f $(LOCALBIN)/golangci-lint ] && { \
+		command -v golangci-lint >/dev/null 2>&1 && {\
+			ln -sf $(shell command -v golangci-lint ) $(LOCALBIN) ;\
+			echo "reusing system golangci-lint" ;\
+		} || { \
+			curl -sSL "https://github.com/golangci/golangci-lint/releases/download/v$(GOLANGCI_LINT_VERSION)/golangci-lint-$(GOLANGCI_LINT_VERSION)-$(OS)-$(ARCH).tar.gz" -o $(GOLANGCI_LINT)-$(GOLANGCI_LINT_VERSION)-$(OS)-$(ARCH).tar.gz ;\
+			tar -x -C $(LOCALBIN) -f $(GOLANGCI_LINT)-$(GOLANGCI_LINT_VERSION)-$(OS)-$(ARCH).tar.gz ;\
+			ln -sf $(GOLANGCI_LINT)-$(GOLANGCI_LINT_VERSION)-$(OS)-$(ARCH)/golangci-lint $(GOLANGCI_LINT)-$(GOLANGCI_LINT_VERSION) ;\
+			ln -sf $(GOLANGCI_LINT)-$(GOLANGCI_LINT_VERSION) $(GOLANGCI_LINT) ;\
+		}; \
+	} || true
+
+.PHONY: dep-install-kind
+dep-install-kind: $(KIND) ## Download kind locally if necessary, or reuse the system binary
 $(KIND): $(LOCALBIN)
-	@command -v $(KIND) >/dev/null 2>&1 || { \
+	@command -v kind >/dev/null 2>&1 && {\
+		ln -sf $(shell command -v kind ) $(LOCALBIN) ;\
+		echo "reusing system kubectl" ;\
+	} || { \
 		curl -sSL "https://kind.sigs.k8s.io/dl/v$(KIND_VERSION)/kind-$(OS)-$(ARCH)" -o $(KIND)-v$(KIND_VERSION) ;\
 		chmod 0755 $(KIND)-v$(KIND_VERSION) ;\
 		ln -sf $(KIND)-v$(KIND_VERSION) $(KIND) ;\
 		echo "downloaded $(shell basename $(KIND)) $(KIND_VERSION) in $(LOCALBIN)" ;\
 	}
 
+.PHONY: system-lint
+system-lint: golangci-lint ## Run golangci-lint linter using system binaries
+	golangci-lint run
+
+.PHONY: system-lint-fix
+system-lint-fix: golangci-lint ## Run golangci-lint linter and perform fixes using system binaries
+	golangci-lint run --fix
+
+.PHONY: lint-config
+system-lint-config: golangci-lint ## Verify golangci-lint linter configuration using system binaries
+	golangci-lint config verify
+
+.PHONY: kind-setup
+kind-setup: ## Set up a Kind cluster if it does not exist
+	@case "$$($(KIND) get clusters)" in \
+		*"$(KIND_CLUSTER)"*) \
+			echo "Kind cluster '$(KIND_CLUSTER)' already exists. Skipping creation." ;; \
+		*) \
+			echo "Creating Kind cluster '$(KIND_CLUSTER)'..."; \
+			$(KIND) create cluster --name $(KIND_CLUSTER) ;; \
+	esac
+
+.PHONY: kind-teardown
+kind-teardown: ## Tear down the Kind cluster created with kind-setup
+	@$(KIND) delete cluster --name $(KIND_CLUSTER)
+
+.PHONY: kind-load-image
+kind-load-image: ## Load the image in the local cluster
+	@$(KIND) load docker-image ${IMG} --name $(KIND_CLUSTER)
 
 # go-install-tool will 'go install' any package with custom target and name of binary, if it doesn't exist
 # $1 - target path with name of binary
