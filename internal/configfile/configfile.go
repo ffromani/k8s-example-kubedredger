@@ -29,17 +29,15 @@ import (
 const DefaultPermission = 644
 
 type ConfigurationStatus struct {
-	LastWriteFailed bool
-	LastWriteError  string
-	FileExists      bool
-	Content         string
-	FileUpdated     time.Time
+	LastWriteError string
+	FileExists     bool
+	Content        string
+	FileUpdated    time.Time
 }
 
 type Manager struct {
-	path            string
-	lastWriteFailed bool
-	lastWriteError  string
+	path           string
+	lastWriteError string
 }
 
 func NewManager(configurationPath string) *Manager {
@@ -66,18 +64,16 @@ func (mgr *Manager) HandleSync(lh logr.Logger, request ConfigRequest) error {
 	err := mgr.handle(lh, request)
 	if err != nil {
 		mgr.lastWriteError = err.Error()
-		mgr.lastWriteFailed = true
 		return err
 	}
 	mgr.lastWriteError = ""
-	mgr.lastWriteFailed = false
 	return nil
 }
 
 // Handle reconciles the on-disk configuration with the given request.
 func (mgr *Manager) handle(lh logr.Logger, request ConfigRequest) error {
 	content := request.Content
-	exists, err := fileExists(mgr.path)
+	exists, err := FileExists(mgr.path)
 	if err != nil {
 		return fmt.Errorf("failed to check if file exists: %w", err)
 	}
@@ -86,7 +82,7 @@ func (mgr *Manager) handle(lh logr.Logger, request ConfigRequest) error {
 		return NonRecoverableError{msg: fmt.Sprintf("file %q does not exist and creation is not allowed", mgr.path)}
 	}
 
-	lh.Info("creating temporary configuration file")
+	lh.Info("creating temporary configuration file", "path", mgr.path)
 
 	tmpFile, err := os.CreateTemp(filepath.Dir(mgr.path), "kubedredger-")
 	if err != nil {
@@ -136,9 +132,14 @@ func (mgr *Manager) Delete() error {
 
 func (mgr *Manager) Status() ConfigurationStatus {
 	res := ConfigurationStatus{
-		LastWriteFailed: mgr.lastWriteFailed,
-		LastWriteError:  mgr.lastWriteError,
+		LastWriteError: mgr.lastWriteError,
 	}
+	finfo, err := os.Stat(mgr.path)
+	if os.IsNotExist(err) {
+		res.FileExists = false
+		return res
+	}
+	res.FileUpdated = finfo.ModTime()
 	content, err := os.ReadFile(mgr.path)
 	if os.IsNotExist(err) {
 		res.FileExists = false
@@ -149,7 +150,7 @@ func (mgr *Manager) Status() ConfigurationStatus {
 	return res
 }
 
-func fileExists(filePath string) (bool, error) {
+func FileExists(filePath string) (bool, error) {
 	_, err := os.Stat(filePath)
 	if err == nil {
 		return true, nil

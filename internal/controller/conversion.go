@@ -59,8 +59,7 @@ func statusFromConfStatus(desired workshopv1alpha1.ConfigurationSpec, confStatus
 	if desired.Content != confStatus.Content && confStatus.LastWriteError != "" {
 		progressing.Status = metav1.ConditionTrue
 		progressing.Reason = ConditionReasonUpdatingContent
-	}
-	if labelErr != nil {
+	} else if labelErr != nil {
 		progressing.Status = metav1.ConditionTrue
 		progressing.Reason = ConditionReasonUpdatingLabels
 		progressing.Message = labelErr.Error()
