@@ -1,9 +1,6 @@
 package controller
 
 import (
-	"crypto/sha256"
-	"fmt"
-
 	workshopv1alpha1 "golab.io/kubedredger/api/v1alpha1"
 	"golab.io/kubedredger/internal/configfile"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -34,9 +31,8 @@ func configurationRequestFromSpec(desired workshopv1alpha1.ConfigurationSpec) co
 	return res
 }
 
-func statusFromConfStatus(desired workshopv1alpha1.ConfigurationSpec, confStatus configfile.ConfigurationStatus, contentLabel string) workshopv1alpha1.ConfigurationStatus {
+func statusFromConfStatus(desired workshopv1alpha1.ConfigurationSpec, confStatus configfile.ConfigurationStatus, labelErr error) workshopv1alpha1.ConfigurationStatus {
 	updateTime := metav1.NewTime(confStatus.FileUpdated)
-	labelMatches := contentLabel == fmt.Sprintf("%x", sha256.Sum256([]byte(desired.Content)))
 
 	res := workshopv1alpha1.ConfigurationStatus{
 		FileExists:  confStatus.FileExists,
@@ -61,12 +57,13 @@ func statusFromConfStatus(desired workshopv1alpha1.ConfigurationSpec, confStatus
 		LastTransitionTime: updateTime,
 	}
 	if desired.Content != confStatus.Content && confStatus.LastWriteError != "" {
+		progressing.Status = metav1.ConditionTrue
 		progressing.Reason = ConditionReasonUpdatingContent
-		progressing.Status = metav1.ConditionTrue
 	}
-	if !labelMatches {
-		progressing.Reason = ConditionReasonUpdatingLabels
+	if labelErr != nil {
 		progressing.Status = metav1.ConditionTrue
+		progressing.Reason = ConditionReasonUpdatingLabels
+		progressing.Message = labelErr.Error()
 	}
 
 	available := metav1.Condition{
@@ -74,7 +71,7 @@ func statusFromConfStatus(desired workshopv1alpha1.ConfigurationSpec, confStatus
 		Status:             metav1.ConditionFalse,
 		LastTransitionTime: updateTime,
 	}
-	if confStatus.LastWriteError == "" && res.Content == desired.Content && labelMatches {
+	if confStatus.LastWriteError == "" && res.Content == desired.Content && labelErr == nil {
 		available.Status = metav1.ConditionTrue
 		available.Reason = ConditionReasonUpToDate
 		available.Message = "file up to date"

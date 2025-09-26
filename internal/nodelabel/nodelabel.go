@@ -64,20 +64,17 @@ func (mgr *Manager) Set(ctx context.Context, key, value string) error {
 	return mgr.cli.Update(ctx, &node)
 }
 
-func (mgr *Manager) GetContentHashLabel(ctx context.Context) (string, error) {
+func (mgr *Manager) Get(ctx context.Context, key string) (string, bool, error) {
 	node := v1.Node{}
 	err := mgr.cli.Get(ctx, client.ObjectKey{Name: mgr.nodeName}, &node)
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
 	if node.Labels == nil {
-		return "", nil
+		return "", false, nil
 	}
-	value, ok := node.Labels[ContentHash]
-	if !ok {
-		return "", nil
-	}
-	return value, nil
+	value, ok := node.Labels[key]
+	return value, ok, nil
 }
 
 func (mgr *Manager) Clear(ctx context.Context) error {
