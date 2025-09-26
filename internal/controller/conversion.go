@@ -11,9 +11,16 @@ import (
 )
 
 const (
-	ConditionAvailable   = "Aligned"
+	ConditionAvailable   = "Available"
 	ConditionProgressing = "Progressing"
 	ConditionDegraded    = "Degraded"
+)
+
+const (
+	ConditionReasonUpToDate        = "UpToDate"
+	ConditionReasonWriteError      = "WriteError"
+	ConditionReasonUpdatingContent = "UpdatingContent"
+	ConditionReasonUpdatingLabels  = "UpdatingLabels"
 )
 
 func configurationRequestFromSpec(desired workshopv1alpha1.ConfigurationSpec) configfile.ConfigRequest {
@@ -44,7 +51,8 @@ func statusFromConfStatus(desired workshopv1alpha1.ConfigurationSpec, confStatus
 	}
 	if confStatus.LastWriteError != "" {
 		degraded.Status = metav1.ConditionTrue
-		degraded.Reason = confStatus.LastWriteError
+		degraded.Reason = ConditionReasonWriteError
+		degraded.Message = confStatus.LastWriteError
 	}
 
 	progressing := metav1.Condition{
@@ -53,9 +61,11 @@ func statusFromConfStatus(desired workshopv1alpha1.ConfigurationSpec, confStatus
 		LastTransitionTime: updateTime,
 	}
 	if desired.Content != confStatus.Content && confStatus.LastWriteError != "" {
+		progressing.Reason = ConditionReasonUpdatingContent
 		progressing.Status = metav1.ConditionTrue
 	}
 	if !labelMatches {
+		progressing.Reason = ConditionReasonUpdatingLabels
 		progressing.Status = metav1.ConditionTrue
 	}
 
@@ -66,7 +76,8 @@ func statusFromConfStatus(desired workshopv1alpha1.ConfigurationSpec, confStatus
 	}
 	if confStatus.LastWriteError == "" && res.Content == desired.Content && labelMatches {
 		available.Status = metav1.ConditionTrue
-		available.Reason = "file up to date"
+		available.Reason = ConditionReasonUpToDate
+		available.Message = "file up to date"
 	}
 	res.Conditions = []metav1.Condition{degraded, progressing, available}
 	return res
