@@ -82,11 +82,7 @@ func (r *ConfigurationReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	lh.Info("labelled node", "value", contentHash, "error", err)
 
 	confStatus := r.ConfMgr.Status()
-	contentLabel, err := r.Labeller.GetContentHashLabel(ctx)
-	if err != nil {
-		lh.Error(err, "could not get content hash label")
-	}
-	conf.Status = statusFromConfStatus(conf.Spec, confStatus, contentLabel)
+	conf.Status = statusFromConfStatus(conf.Spec, confStatus, err)
 
 	if !statusesAreEqual(oldStatus, &conf.Status) {
 		updErr := r.Client.Status().Update(ctx, &conf)
