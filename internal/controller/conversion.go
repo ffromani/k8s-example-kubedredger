@@ -14,6 +14,7 @@ const (
 )
 
 const (
+	ConditionReasonAsExpected      = "AsExpected"
 	ConditionReasonUpToDate        = "UpToDate"
 	ConditionReasonWriteError      = "WriteError"
 	ConditionReasonUpdatingContent = "UpdatingContent"
@@ -44,6 +45,7 @@ func statusFromConfStatus(desired workshopv1alpha1.ConfigurationSpec, confStatus
 		Type:               ConditionDegraded,
 		Status:             metav1.ConditionFalse,
 		LastTransitionTime: updateTime,
+		Reason:             ConditionReasonAsExpected,
 	}
 	if confStatus.LastWriteError != "" {
 		degraded.Status = metav1.ConditionTrue
@@ -55,6 +57,7 @@ func statusFromConfStatus(desired workshopv1alpha1.ConfigurationSpec, confStatus
 		Type:               ConditionProgressing,
 		Status:             metav1.ConditionFalse,
 		LastTransitionTime: updateTime,
+		Reason:             ConditionReasonAsExpected,
 	}
 	if desired.Content != confStatus.Content && confStatus.LastWriteError != "" {
 		progressing.Status = metav1.ConditionTrue
@@ -69,6 +72,7 @@ func statusFromConfStatus(desired workshopv1alpha1.ConfigurationSpec, confStatus
 		Type:               ConditionAvailable,
 		Status:             metav1.ConditionFalse,
 		LastTransitionTime: updateTime,
+		Reason:             ConditionReasonAsExpected,
 	}
 	if confStatus.LastWriteError == "" && res.Content == desired.Content && labelErr == nil {
 		available.Status = metav1.ConditionTrue
