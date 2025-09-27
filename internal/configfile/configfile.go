@@ -26,26 +26,42 @@ import (
 	"github.com/go-logr/logr"
 )
 
+// DefaultPermission is the default UNIX permission expressed in octal form
+// the file(s) will be using. Example: 644 (rw-r--r--)
 const DefaultPermission = 644
 
+// ConfigurationStatus represents informations about how the last configuration
+// sync went
 type ConfigurationStatus struct {
+	// LastWriteError is the last occurred error in human-friendly way
 	LastWriteError string
-	FileExists     bool
-	Content        string
-	FileUpdated    time.Time
+	// FileExists is true if the file was created. Note this is true even if the content is out of sync
+	FileExists bool
+	// Content is a mirror of the last content written on storage
+	Content string
+	// FileUpdate is a timestamp of the last time the file was successfully updated
+	FileUpdated time.Time
 }
 
+// Manager represent an object capable of storing the configuration on a given path
 type Manager struct {
 	path           string
 	lastWriteError string
 }
 
+// NewManager creates a Manager owning a given <configurationPath>
+// When a Manager is created, the assumption is it becomes the sole and only
+// owner of the path. The user must not assume the Manager will ignore content
+// he didn't create: being the sole owner of a path, it can cancel data
+// at any time and change according to its policies.
+// The manager will guarantee data is stored in the configuration files.
 func NewManager(configurationPath string) *Manager {
 	return &Manager{
 		path: configurationPath,
 	}
 }
 
+// NonRecoverableError is an error which can't be retried. Parameters must change.
 type NonRecoverableError struct {
 	msg string
 }
@@ -54,12 +70,16 @@ func (e NonRecoverableError) Error() string {
 	return e.msg
 }
 
+// ConfigRequest represents a request to write configuration on storage.
 type ConfigRequest struct {
 	Content    string
 	Create     bool
 	Permission *uint32
 }
 
+// HandleSync reconciles the on-disk configuration with the given request.
+// Once it returns, the operation is completed.
+// On failure, returns non-nil error; on success, returns nil
 func (mgr *Manager) HandleSync(lh logr.Logger, request ConfigRequest) error {
 	err := mgr.handle(lh, request)
 	if err != nil {
@@ -70,7 +90,6 @@ func (mgr *Manager) HandleSync(lh logr.Logger, request ConfigRequest) error {
 	return nil
 }
 
-// Handle reconciles the on-disk configuration with the given request.
 func (mgr *Manager) handle(lh logr.Logger, request ConfigRequest) error {
 	content := request.Content
 	exists, err := FileExists(mgr.path)
@@ -130,6 +149,7 @@ func (mgr *Manager) Delete() error {
 	return nil
 }
 
+// Status reports how the last sync attempt went.
 func (mgr *Manager) Status() ConfigurationStatus {
 	res := ConfigurationStatus{
 		LastWriteError: mgr.lastWriteError,
@@ -150,6 +170,8 @@ func (mgr *Manager) Status() ConfigurationStatus {
 	return res
 }
 
+// FileExists return true if the given path exists;
+// On failure, returns non-nil error and the truth value should be ignored.
 func FileExists(filePath string) (bool, error) {
 	_, err := os.Stat(filePath)
 	if err == nil {

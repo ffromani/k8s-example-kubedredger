@@ -27,6 +27,8 @@ type ConfigurationSpec struct {
 
 	// Create indicates whether to create the file if it does not exist
 	Create bool `json:"create,omitempty"`
+
+	// Permission is the UNIX permission octal bit mask (example: 0644) the file should have
 	// +optional
 	Permission *uint32 `json:"permission,omitempty"`
 }
@@ -41,6 +43,7 @@ type ConfigurationStatus struct {
 
 	// FileExists indicates whether the file exists at the specified path
 	FileExists bool `json:"fileExists,omitempty"`
+
 	// The status of each condition is one of True, False, or Unknown.
 	// +listType=map
 	// +listMapKey=type
