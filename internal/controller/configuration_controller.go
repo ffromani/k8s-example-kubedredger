@@ -77,7 +77,7 @@ func (r *ConfigurationReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		return ctrl.Result{}, nil
 	}
 
-	contentHash := fmt.Sprintf("%x", sha256.Sum256([]byte(conf.Spec.Content)))[:60]
+	contentHash := fmt.Sprintf("%x", sha256.Sum256([]byte(conf.Spec.Content)))
 	err = r.Labeller.Set(ctx, nodelabel.ContentHash, contentHash)
 	lh.Info("labelled node", "value", contentHash, "error", err)
 
