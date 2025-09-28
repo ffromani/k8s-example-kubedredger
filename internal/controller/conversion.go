@@ -23,8 +23,9 @@ const (
 
 func configurationRequestFromSpec(desired workshopv1alpha1.ConfigurationSpec) configfile.ConfigRequest {
 	res := configfile.ConfigRequest{
-		Content: desired.Content,
-		Create:  desired.Create,
+		Filename: desired.Filename,
+		Content:  desired.Content,
+		Create:   desired.Create,
 	}
 	if desired.Permission != nil {
 		res.Permission = ptr.To(*desired.Permission)

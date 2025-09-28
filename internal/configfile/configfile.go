@@ -17,6 +17,7 @@ limitations under the License.
 package configfile
 
 import (
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
@@ -45,8 +46,8 @@ type ConfigurationStatus struct {
 
 // Manager represent an object capable of storing the configuration on a given path
 type Manager struct {
-	path           string
-	lastWriteError string
+	path string
+	errs map[string]error
 }
 
 // NewManager creates a Manager owning a given <configurationPath>
@@ -58,20 +59,58 @@ type Manager struct {
 func NewManager(configurationPath string) *Manager {
 	return &Manager{
 		path: configurationPath,
+		errs: make(map[string]error),
 	}
 }
 
 // NonRecoverableError is an error which can't be retried. Parameters must change.
 type NonRecoverableError struct {
-	msg string
+	err error
 }
 
 func (e NonRecoverableError) Error() string {
-	return e.msg
+	return e.err.Error()
+}
+
+func (mgr *Manager) CleanAll(lh logr.Logger) error {
+	entries, err := os.ReadDir(mgr.path)
+	if err != nil {
+		lh.Info("configuration root missing, recreating", "configRoot", mgr.path)
+		if os.IsNotExist(err) {
+			return os.MkdirAll(mgr.path, 0755)
+		}
+		return err
+	}
+
+	entryNames := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		entryNames = append(entryNames, entry.Name())
+	}
+
+	err = mgr.CleanEntries(entryNames...)
+	if err != nil {
+		return NonRecoverableError{
+			err: err,
+		}
+	}
+	return nil
+}
+
+func (mgr *Manager) CleanEntries(entries ...string) error {
+	var errs []error
+	for _, entry := range entries {
+		entryPath := filepath.Join(mgr.path, entry)
+		err := os.RemoveAll(entryPath)
+		if err != nil {
+			errs = append(errs, err)
+		}
+	}
+	return errors.Join(errs...)
 }
 
 // ConfigRequest represents a request to write configuration on storage.
 type ConfigRequest struct {
+	Filename   string
 	Content    string
 	Create     bool
 	Permission *uint32
@@ -83,25 +122,27 @@ type ConfigRequest struct {
 func (mgr *Manager) HandleSync(lh logr.Logger, request ConfigRequest) error {
 	err := mgr.handle(lh, request)
 	if err != nil {
-		mgr.lastWriteError = err.Error()
+		mgr.errs[request.Filename] = err
 		return err
 	}
-	mgr.lastWriteError = ""
 	return nil
 }
 
 func (mgr *Manager) handle(lh logr.Logger, request ConfigRequest) error {
 	content := request.Content
-	exists, err := FileExists(mgr.path)
+	fullPath := filepath.Join(mgr.path, request.Filename)
+	exists, err := FileExists(fullPath)
 	if err != nil {
-		return fmt.Errorf("failed to check if file exists: %w", err)
+		return fmt.Errorf("failed to check if file %q exists: %w", fullPath, err)
 	}
 
 	if !exists && !request.Create {
-		return NonRecoverableError{msg: fmt.Sprintf("file %q does not exist and creation is not allowed", mgr.path)}
+		return NonRecoverableError{
+			err: fmt.Errorf("file %q does not exist and creation is not allowed", mgr.path),
+		}
 	}
 
-	lh.Info("creating temporary configuration file", "path", mgr.path)
+	lh.Info("creating temporary configuration file", "path", fullPath)
 
 	tmpFile, err := os.CreateTemp(filepath.Dir(mgr.path), "kubedredger-")
 	if err != nil {
@@ -129,7 +170,7 @@ func (mgr *Manager) handle(lh logr.Logger, request ConfigRequest) error {
 	if err := tmpFile.Close(); err != nil {
 		return fmt.Errorf("failed to close temporary file: %w", err)
 	}
-	if err := os.Rename(tmpFile.Name(), mgr.path); err != nil {
+	if err := os.Rename(tmpFile.Name(), fullPath); err != nil {
 		return fmt.Errorf("failed to rename temporary file: %w", err)
 	}
 
@@ -138,29 +179,35 @@ func (mgr *Manager) handle(lh logr.Logger, request ConfigRequest) error {
 }
 
 // Delete removes the configuration file at the manager's path.
-func (mgr *Manager) Delete() error {
-	err := os.Remove(mgr.path)
+func (mgr *Manager) Delete(fileName string) error {
+	fullPath := filepath.Join(mgr.path, fileName)
+	err := os.Remove(fullPath)
 	if os.IsNotExist(err) {
+		delete(mgr.errs, fileName)
 		return nil
 	}
 	if err != nil {
-		return fmt.Errorf("failed to delete file %q: %w", mgr.path, err)
+		mgr.errs[fileName] = err
+		return fmt.Errorf("failed to delete file %q: %w", fullPath, err)
 	}
+	delete(mgr.errs, fileName)
 	return nil
 }
 
 // Status reports how the last sync attempt went.
-func (mgr *Manager) Status() ConfigurationStatus {
-	res := ConfigurationStatus{
-		LastWriteError: mgr.lastWriteError,
+func (mgr *Manager) Status(fileName string) ConfigurationStatus {
+	fullPath := filepath.Join(mgr.path, fileName)
+	res := ConfigurationStatus{}
+	if err := mgr.errs[fileName]; err != nil {
+		res.LastWriteError = err.Error()
 	}
-	finfo, err := os.Stat(mgr.path)
+	finfo, err := os.Stat(fullPath)
 	if os.IsNotExist(err) {
 		res.FileExists = false
 		return res
 	}
 	res.FileUpdated = finfo.ModTime()
-	content, err := os.ReadFile(mgr.path)
+	content, err := os.ReadFile(fullPath)
 	if os.IsNotExist(err) {
 		res.FileExists = false
 		return res

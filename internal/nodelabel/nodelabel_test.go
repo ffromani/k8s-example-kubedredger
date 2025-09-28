@@ -164,7 +164,7 @@ func TestManagerSet(t *testing.T) {
 				},
 			},
 			nodeName:   "test-node",
-			labelKey:   ContentHash,
+			labelKey:   ContentHashV1,
 			labelValue: "test-fake-hash",
 			expectedOK: true,
 		},
@@ -176,7 +176,7 @@ func TestManagerSet(t *testing.T) {
 				},
 			},
 			nodeName:   "test-node",
-			labelKey:   ContentHash,
+			labelKey:   ContentHashV1,
 			labelValue: "test-fake-hash",
 			expectedOK: true,
 		},
@@ -186,12 +186,12 @@ func TestManagerSet(t *testing.T) {
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "test-node",
 					Labels: map[string]string{
-						ContentHash: "test-fake-hash-old",
+						ContentHashV1: "test-fake-hash-old",
 					},
 				},
 			},
 			nodeName:   "test-node",
-			labelKey:   ContentHash,
+			labelKey:   ContentHashV1,
 			labelValue: "test-fake-hash-new",
 			expectedOK: true,
 		},
@@ -277,9 +277,9 @@ func TestManagerClear(t *testing.T) {
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "test-node",
 					Labels: map[string]string{
-						ContentHash: "test-fake-hash",
-						"foo":       "quux",
-						"bar":       "42",
+						ContentHashV1: "test-fake-hash",
+						"foo":         "quux",
+						"bar":         "42",
 					},
 				},
 			},
@@ -298,7 +298,7 @@ func TestManagerClear(t *testing.T) {
 			cli := newFakeClient(tcase.node)
 			mgr := NewManager(tcase.nodeName, cli)
 			oldLabels := maps.Clone(tcase.node.Labels)
-			err := mgr.Clear(context.TODO())
+			err := mgr.Clear(context.TODO(), ContentHashV1)
 			ok := (err == nil)
 			if ok != tcase.expectedOK {
 				t.Fatalf("unexpected status. err=%v", err)
