@@ -56,7 +56,7 @@ func init() {
 
 // nolint:gocyclo
 func main() {
-	var configurationRoot string
+	var configurationFile string
 	var metricsAddr string
 	var metricsCertPath, metricsCertName, metricsCertKey string
 	var webhookCertPath, webhookCertName, webhookCertKey string
@@ -65,7 +65,7 @@ func main() {
 	var secureMetrics bool
 	var enableHTTP2 bool
 	var tlsOpts []func(*tls.Config)
-	flag.StringVar(&configurationRoot, "configuration-root", "/etc", "The root for the configuration file path")
+	flag.StringVar(&configurationFile, "configuration-file", "/tmp/config", "The configuration file path")
 	flag.StringVar(&metricsAddr, "metrics-bind-address", "0", "The address the metrics endpoint binds to. "+
 		"Use :8443 for HTTPS or :8080 for HTTP, or leave as 0 to disable the metrics service.")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
@@ -188,7 +188,7 @@ func main() {
 	if err := (&controller.ConfigurationReconciler{
 		Client:   cli,
 		Scheme:   mgr.GetScheme(),
-		ConfMgr:  configfile.NewManager(configurationRoot),
+		ConfMgr:  configfile.NewManager(configurationFile),
 		Labeller: nodelabel.NewManager(nodeName, cli),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Configuration")
