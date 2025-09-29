@@ -86,7 +86,7 @@ func (r *ConfigurationReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 
 	if !statusesAreEqual(oldStatus, &conf.Status) {
 		updErr := r.Client.Status().Update(ctx, &conf)
-		if updErr != nil {
+		if updErr != nil && !apierrors.IsNotFound(updErr) {
 			lh.Error(updErr, "Failed to update configuration status")
 			return ctrl.Result{}, fmt.Errorf("could not update status for object %s: %w", client.ObjectKeyFromObject(&conf), updErr)
 		}
