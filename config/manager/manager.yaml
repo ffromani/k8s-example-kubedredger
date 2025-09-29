@@ -63,11 +63,11 @@ spec:
         args:
           - --leader-elect
           - --health-probe-bind-address=:8081
+          - --configuration-file=/host/tmp/config
         image: controller:latest
         name: manager
         ports: []
         securityContext:
-          readOnlyRootFilesystem: true
           allowPrivilegeEscalation: false
           capabilities:
             drop:
@@ -93,7 +93,19 @@ spec:
           requests:
             cpu: 10m
             memory: 64Mi
-        volumeMounts: []
-      volumes: []
+        env:
+        - name: NODE_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: spec.nodeName
+        volumeMounts:
+        - name: node-root
+          mountPath: /host
+          readOnly: false
+      volumes:
+      - name: node-root
+        hostPath:
+          path: /
+          type: Directory
       serviceAccountName: controller-manager
       terminationGracePeriodSeconds: 10

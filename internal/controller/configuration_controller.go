@@ -44,7 +44,7 @@ type ConfigurationReconciler struct {
 // +kubebuilder:rbac:groups=workshop.golab.io,resources=configurations,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=workshop.golab.io,resources=configurations/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=workshop.golab.io,resources=configurations/finalizers,verbs=update
-// +kubebuilder:rbac:groups="",resources=nodes,verbs=get;update;patch
+// +kubebuilder:rbac:groups="",resources=nodes,verbs=get;update;patch;list;watch
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.
@@ -86,7 +86,7 @@ func (r *ConfigurationReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 
 	if !statusesAreEqual(oldStatus, &conf.Status) {
 		updErr := r.Client.Status().Update(ctx, &conf)
-		if updErr != nil {
+		if updErr != nil && !apierrors.IsNotFound(updErr) {
 			lh.Error(updErr, "Failed to update configuration status")
 			return ctrl.Result{}, fmt.Errorf("could not update status for object %s: %w", client.ObjectKeyFromObject(&conf), updErr)
 		}

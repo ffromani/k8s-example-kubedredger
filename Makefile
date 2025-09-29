@@ -233,6 +233,16 @@ $(GOLANGCI_LINT): dep-install-golangci-lint
 ##@ Workshop-specific helpers
 
 # extra deps
+.PHONY: test-e2e-golab
+test-e2e-golab: deploy-on-kind
+	KIND=$(KIND) KIND_CLUSTER=$(KIND_CLUSTER) go test -tags=e2e ./test/e2eworkshop/ -v -ginkgo.v
+	$(MAKE) cleanup-test-e2e
+
+.PHONY: deploy-on-kind
+deploy-on-kind: dep-install-kubectl dep-install-kind docker-build kind-setup kind-load-image deploy
+	$(KUBECTL) delete pods --all -n k8s-example-kubedredger-system
+
+
 .PHONY: dep-install-kubectl
 dep-install-kubectl: $(KUBECTL) ## Download kubectl locally if necessary, or reuse the system binary.
 $(KUBECTL): $(LOCALBIN)
@@ -265,7 +275,7 @@ dep-install-kind: $(KIND) ## Download kind locally if necessary, or reuse the sy
 $(KIND): $(LOCALBIN)
 	@command -v kind >/dev/null 2>&1 && {\
 		ln -sf $(shell command -v kind ) $(LOCALBIN) ;\
-		echo "reusing system kubectl" ;\
+		echo "reusing system kind" ;\
 	} || { \
 		curl -sSL "https://kind.sigs.k8s.io/dl/v$(KIND_VERSION)/kind-$(OS)-$(ARCH)" -o $(KIND)-v$(KIND_VERSION) ;\
 		chmod 0755 $(KIND)-v$(KIND_VERSION) ;\
