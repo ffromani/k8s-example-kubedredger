@@ -17,22 +17,6 @@ jobs:
         with:
           go-version-file: go.mod
 
-      - name: Install the latest version of kind
-        run: |
-          make dep-install-kind
-          make dep-install-kubectl
-
-      - name: Verify local versions
-        run: |
-          bin/kind version
-          bin/kubectl version
-
-      - name: Setup cluster
-        run: |
-          make kind-setup
-          make kind-load-image
-
       - name: Running Test e2e
         run: |
-          go mod tidy
-          make test-e2e
+          make test-e2e-golab
