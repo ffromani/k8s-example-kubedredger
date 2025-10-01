@@ -324,15 +324,6 @@ func verifyAvailableStatus(confStatus *workshopv1alpha1.ConfigurationStatus) err
 	return nil
 }
 
-func verifyProgressingStatus(confStatus *workshopv1alpha1.ConfigurationStatus) error {
-	if !isConditionEqual(confStatus.Conditions, ConditionAvailable, metav1.ConditionFalse) ||
-		!isConditionEqual(confStatus.Conditions, ConditionProgressing, metav1.ConditionTrue) ||
-		!isConditionEqual(confStatus.Conditions, ConditionDegraded, metav1.ConditionFalse) {
-		return fmt.Errorf("unexpected status conditions: %#v", confStatus.Conditions)
-	}
-	return nil
-}
-
 func isConditionEqual(conds []metav1.Condition, condType string, condStatus metav1.ConditionStatus) bool {
 	for _, cond := range conds {
 		if cond.Type == condType {
