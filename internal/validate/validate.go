@@ -14,6 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
+// Package validate performs API semantic validations. Operates on API objects.
 package validate
 
 import (
@@ -28,6 +29,8 @@ var (
 	ErrInvalidPermission = errors.New("requested permissions are not a valid UNIX permission set")
 )
 
+// Request ensures a spec is semantically correct. If so returns nil,
+// otherwise a well known Error (validate.Err*)
 func Request(spec workshopv1alpha1.ConfigurationSpec) error {
 	if spec.Filename == "" {
 		return ErrMissingFilename

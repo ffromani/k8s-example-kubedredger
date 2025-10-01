@@ -14,6 +14,8 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
+// Package configfile provide facilities to create, update and delete
+// configuration file. It is meant to be used by the controller.
 package configfile
 
 import (

@@ -14,6 +14,8 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
+// Package controller implements the kubernetes controller reconciliation.
+// It is the top level package which orchestrates the other packages.
 package controller
 
 import (
