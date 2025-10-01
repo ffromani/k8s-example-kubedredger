@@ -38,7 +38,6 @@ import (
 	workshopv1alpha1 "golab.io/kubedredger/api/v1alpha1"
 	"golab.io/kubedredger/internal/configfile"
 	"golab.io/kubedredger/internal/controller"
-	"golab.io/kubedredger/internal/nodelabel"
 	// +kubebuilder:scaffold:imports
 )
 
@@ -192,10 +191,9 @@ func main() {
 
 	cli := mgr.GetClient()
 	if err := (&controller.ConfigurationReconciler{
-		Client:   cli,
-		Scheme:   mgr.GetScheme(),
-		ConfMgr:  confMgr,
-		Labeller: nodelabel.NewManager(nodeName, cli),
+		Client:  cli,
+		Scheme:  mgr.GetScheme(),
+		ConfMgr: confMgr,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Configuration")
 		os.Exit(1)

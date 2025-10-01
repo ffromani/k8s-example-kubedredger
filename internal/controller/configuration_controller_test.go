@@ -18,7 +18,6 @@ package controller
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -36,12 +35,9 @@ import (
 
 	workshopv1alpha1 "golab.io/kubedredger/api/v1alpha1"
 	"golab.io/kubedredger/internal/configfile"
-	"golab.io/kubedredger/internal/nodelabel"
 )
 
 const (
-	testNodeName = "test-host"
-
 	confSnippet = "answer=42\n"
 )
 
@@ -55,16 +51,14 @@ func NewFakeConfigurationReconciler() (*ConfigurationReconciler, string, func() 
 		return os.RemoveAll(dir)
 	}
 	rec := ConfigurationReconciler{
-		Client:   k8sClient,
-		Scheme:   scheme.Scheme,
-		ConfMgr:  configfile.NewManager(dir),
-		Labeller: nodelabel.NewManager(testNodeName, k8sClient),
+		Client:  k8sClient,
+		Scheme:  scheme.Scheme,
+		ConfMgr: configfile.NewManager(dir),
 	}
 	return &rec, dir, cleanup, nil
 }
 
 var _ = Describe("Configuration Controller", func() {
-	var testNode *v1.Node
 	var testNamespace *v1.Namespace
 
 	Context("When reconciling a resource", func() {
@@ -76,12 +70,6 @@ var _ = Describe("Configuration Controller", func() {
 			var err error
 			reconciler, configRoot, cleanup, err = NewFakeConfigurationReconciler()
 			Expect(err).ToNot(HaveOccurred())
-
-			testNode = &v1.Node{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: testNodeName,
-				},
-			}
 
 			ctx := context.Background()
 			Expect(err).ToNot(HaveOccurred())
@@ -102,16 +90,7 @@ var _ = Describe("Configuration Controller", func() {
 			Expect(cleanup()).To(Succeed())
 		})
 
-		When("node objects are present", func() {
-			BeforeEach(func() {
-				Expect(reconciler.Client.Create(ctx, testNode)).To(Succeed())
-				Expect(testNamespace).ToNot(BeNil())
-			})
-
-			AfterEach(func() {
-				Expect(reconciler.Client.Delete(context.Background(), testNode)).To(Succeed())
-			})
-
+		When("handling the configuration", func() {
 			It("creates the configuration from scratch", func(ctx context.Context) {
 
 				conf := &workshopv1alpha1.Configuration{
@@ -200,7 +179,6 @@ var _ = Describe("Configuration Controller", func() {
 
 				Expect(reconciler.Client.Get(ctx, key, updatedConf)).To(Succeed())
 				Expect(verifyAvailableStatus(&updatedConf.Status)).To(Succeed())
-				Expect(verifyNodeIsLabelled(ctx, reconciler.Client, testNode.Name, updatedConf.Spec.Filename)).To(Succeed())
 			})
 
 			It("does not create the same configuration file twice", func(ctx context.Context) {
@@ -310,7 +288,6 @@ var _ = Describe("Configuration Controller", func() {
 
 				Expect(reconciler.Client.Get(ctx, key, updatedConf)).To(Succeed())
 				Expect(verifyAvailableStatus(&updatedConf.Status)).To(Succeed())
-				Expect(verifyNodeIsLabelled(ctx, reconciler.Client, testNode.Name, updatedConf.Spec.Filename)).To(Succeed())
 
 				Expect(reconciler.Client.Get(ctx, client.ObjectKeyFromObject(conf), conf)).To(Succeed())
 				conf.Spec.Create = false
@@ -330,105 +307,7 @@ var _ = Describe("Configuration Controller", func() {
 
 				Expect(reconciler.Client.Get(ctx, key, updatedConf)).To(Succeed())
 				Expect(verifyAvailableStatus(&updatedConf.Status)).To(Succeed())
-				Expect(verifyNodeIsLabelled(ctx, reconciler.Client, testNode.Name, updatedConf.Spec.Filename)).To(Succeed())
 			})
-		})
-
-		When("node objects are missing", func() {
-			It("creates the configuration from scratch, but stays in progress because it can't update the node labels", func(ctx context.Context) {
-				conf := &workshopv1alpha1.Configuration{
-					ObjectMeta: metav1.ObjectMeta{
-						Namespace: testNamespace.Name,
-						Name:      "test-create",
-					},
-					Spec: workshopv1alpha1.ConfigurationSpec{
-						Filename: "golab.conf",
-						Content:  "foo=bar\nbaz=42\n",
-						Create:   true,
-					},
-				}
-				Expect(reconciler.Client.Create(ctx, conf)).To(Succeed())
-				DeferCleanup(func() {
-					Expect(reconciler.Client.Delete(context.Background(), conf)).To(Succeed())
-				})
-
-				key := client.ObjectKeyFromObject(conf)
-				_, err := reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: key})
-				Expect(err).To(HaveOccurred())
-
-				updatedConf := &workshopv1alpha1.Configuration{}
-				Expect(reconciler.Client.Get(ctx, key, updatedConf)).To(Succeed())
-				Expect(verifyProgressingStatus(&updatedConf.Status)).To(Succeed())
-
-				configPath := filepath.Join(configRoot, conf.Spec.Filename)
-				// still should have created the file!
-				_, err = os.Stat(configPath)
-				Expect(err).NotTo(HaveOccurred(), "error Stat()ing configuration file")
-
-				data, err := os.ReadFile(configPath)
-				Expect(err).NotTo(HaveOccurred(), "error reading configuration file content")
-				Expect(string(data)).To(Equal(conf.Spec.Content), "configuration content doesn't match")
-			})
-		})
-		It("creates the configuration from scratch, but stays in progress if can't update the k8s node object, then succeeds", func(ctx context.Context) {
-			conf := &workshopv1alpha1.Configuration{
-				ObjectMeta: metav1.ObjectMeta{
-					Namespace: testNamespace.Name,
-					Name:      "test-create",
-				},
-				Spec: workshopv1alpha1.ConfigurationSpec{
-					Filename:   "golab2025.conf",
-					Content:    "foo=bar\nbaz=42\n",
-					Create:     true,
-					Permission: ptr.To[uint32](0600),
-				},
-			}
-			Expect(reconciler.Client.Create(ctx, conf)).To(Succeed())
-			DeferCleanup(func() {
-				Expect(reconciler.Client.Delete(context.Background(), conf)).To(Succeed())
-			})
-
-			key := client.ObjectKeyFromObject(conf)
-			_, err := reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: key})
-			Expect(err).To(HaveOccurred())
-
-			updatedConf := &workshopv1alpha1.Configuration{}
-			Expect(reconciler.Client.Get(ctx, key, updatedConf)).To(Succeed())
-			Expect(verifyProgressingStatus(&updatedConf.Status)).To(Succeed())
-
-			configPath := filepath.Join(configRoot, conf.Spec.Filename)
-			// still should have created the file!
-			finfo, err := os.Stat(configPath)
-			Expect(err).NotTo(HaveOccurred(), "error Stat()ing configuration file")
-
-			Expect(uint32(finfo.Mode())).To(Equal(uint32(0600)), "error checking permissions, got %o expected %o", finfo.Mode(), 0600)
-			data, err := os.ReadFile(configPath)
-			Expect(err).NotTo(HaveOccurred(), "error reading configuration file content")
-			Expect(string(data)).To(Equal(conf.Spec.Content), "configuration content doesn't match")
-
-			Expect(reconciler.Client.Create(ctx, testNode)).To(Succeed())
-			DeferCleanup(func() {
-				Expect(reconciler.Client.Delete(context.Background(), testNode)).To(Succeed())
-			})
-
-			var updatedNode v1.Node
-			Expect(reconciler.Client.Get(ctx, client.ObjectKeyFromObject(testNode), &updatedNode)).To(Succeed())
-			Expect(updatedNode.Labels).ToNot(HaveKey(nodelabel.MakeContentHashLabel(conf.Spec.Filename)))
-
-			_, err = reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: key})
-			Expect(err).ToNot(HaveOccurred())
-			finfo, err = os.Stat(configPath)
-			Expect(err).NotTo(HaveOccurred(), "error Stat()ing configuration file")
-
-			Expect(uint32(finfo.Mode())).To(Equal(uint32(0600)), "error checking permissions, got %o expected %o", finfo.Mode(), 0600)
-			data, err = os.ReadFile(configPath)
-			Expect(err).NotTo(HaveOccurred(), "error reading configuration file content")
-			Expect(string(data)).To(Equal(conf.Spec.Content), "configuration content doesn't match")
-
-			Expect(reconciler.Client.Get(ctx, key, updatedConf)).To(Succeed())
-			Expect(verifyAvailableStatus(&updatedConf.Status)).To(Succeed())
-
-			Expect(verifyNodeIsLabelled(ctx, reconciler.Client, testNode.Name, updatedConf.Spec.Filename)).To(Succeed())
 		})
 	})
 })
@@ -461,18 +340,4 @@ func isConditionEqual(conds []metav1.Condition, condType string, condStatus meta
 		}
 	}
 	return false
-}
-func verifyNodeIsLabelled(ctx context.Context, cli client.Client, nodeName, fileName string) error {
-	var updatedNode v1.Node
-	if err := cli.Get(ctx, client.ObjectKey{Name: nodeName}, &updatedNode); err != nil {
-		return err
-	}
-	val, ok := updatedNode.Labels[nodelabel.MakeContentHashLabel(fileName)]
-	if !ok {
-		return errors.New("missing contenthash key")
-	}
-	if val == "" {
-		return errors.New("empty contenthash value")
-	}
-	return nil
 }
