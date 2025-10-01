@@ -27,14 +27,14 @@ import (
 )
 
 const (
+	defaultConfName    = "workshop.conf"
 	minimalConfContent = "[main]\nfoo=bar\n"
 )
 
 func TestStatusFromEmpty(t *testing.T) {
 	tmpDir := t.TempDir()
-	confPath := filepath.Join(tmpDir, "workshop1.conf")
-	mgr := NewManager(confPath)
-	st := mgr.Status()
+	mgr := NewManager(tmpDir)
+	st := mgr.Status(defaultConfName)
 	exp := ConfigurationStatus{}
 
 	if diff := cmp.Diff(st, exp); diff != "" {
@@ -48,17 +48,18 @@ func TestCreateFromScratch(t *testing.T) {
 	time.Sleep(51 * time.Millisecond) // ensure update time diff
 
 	tmpDir := t.TempDir()
-	confPath := filepath.Join(tmpDir, "workshop1.conf")
-	mgr := NewManager(confPath)
+	mgr := NewManager(tmpDir)
 	err := mgr.HandleSync(lh, ConfigRequest{
-		Content: minimalConfContent,
-		Create:  true,
+		Filename: defaultConfName,
+		Content:  minimalConfContent,
+		Create:   true,
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	st := mgr.Status()
+	confPath := filepath.Join(tmpDir, defaultConfName)
+	st := mgr.Status(defaultConfName)
 	verifyFileExistsWithContent(t, st, confPath, minimalConfContent, ts)
 }
 
@@ -66,11 +67,11 @@ func TestCreateNotSet(t *testing.T) {
 	lh := testr.New(t)
 
 	tmpDir := t.TempDir()
-	confPath := filepath.Join(tmpDir, "workshop1.conf")
-	mgr := NewManager(confPath)
+	mgr := NewManager(tmpDir)
 	err := mgr.HandleSync(lh, ConfigRequest{
-		Content: minimalConfContent,
-		Create:  false,
+		Filename: defaultConfName,
+		Content:  minimalConfContent,
+		Create:   false,
 	})
 	if err == nil {
 		t.Fatalf("create set, but file does not exist and this was allowed")
@@ -83,20 +84,21 @@ func TestCreateDelete(t *testing.T) {
 	time.Sleep(51 * time.Millisecond) // ensure update time diff
 
 	tmpDir := t.TempDir()
-	confPath := filepath.Join(tmpDir, "workshop1.conf")
-	mgr := NewManager(confPath)
+	mgr := NewManager(tmpDir)
 	err := mgr.HandleSync(lh, ConfigRequest{
-		Content: minimalConfContent,
-		Create:  true,
+		Filename: defaultConfName,
+		Content:  minimalConfContent,
+		Create:   true,
 	})
 	if err != nil {
 		t.Fatalf("unexpected sync error: %v", err)
 	}
 
-	st := mgr.Status()
+	confPath := filepath.Join(tmpDir, defaultConfName)
+	st := mgr.Status(defaultConfName)
 	verifyFileExistsWithContent(t, st, confPath, minimalConfContent, ts)
 
-	err = mgr.Delete()
+	err = mgr.Delete(defaultConfName)
 	if err != nil {
 		t.Fatalf("unexpected delete error: %v", err)
 	}
@@ -116,29 +118,31 @@ func TestCreateUpdate(t *testing.T) {
 	time.Sleep(51 * time.Millisecond) // ensure update time diff
 
 	tmpDir := t.TempDir()
-	confPath := filepath.Join(tmpDir, "workshop1.conf")
-	mgr := NewManager(confPath)
+	mgr := NewManager(tmpDir)
 	err := mgr.HandleSync(lh, ConfigRequest{
-		Content: minimalConfContent,
-		Create:  true,
+		Filename: defaultConfName,
+		Content:  minimalConfContent,
+		Create:   true,
 	})
 	if err != nil {
 		t.Fatalf("unexpected create error: %v", err)
 	}
 
-	st := mgr.Status()
+	confPath := filepath.Join(tmpDir, defaultConfName)
+	st := mgr.Status(defaultConfName)
 	verifyFileExistsWithContent(t, st, confPath, minimalConfContent, ts)
 
 	time.Sleep(51 * time.Millisecond) // ensure update time diff
 	content2 := `{\n"  foo": "bar"\n}`
 	err = mgr.HandleSync(lh, ConfigRequest{
-		Content: content2,
+		Filename: defaultConfName,
+		Content:  content2,
 	})
 	if err != nil {
 		t.Fatalf("unexpected create error: %v", err)
 	}
 
-	st2 := mgr.Status()
+	st2 := mgr.Status(defaultConfName)
 	verifyFileExistsWithContent(t, st2, confPath, content2, ts)
 }
 

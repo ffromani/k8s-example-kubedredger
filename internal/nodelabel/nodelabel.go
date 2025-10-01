@@ -19,6 +19,7 @@ package nodelabel
 import (
 	"context"
 	"errors"
+	"strings"
 
 	v1 "k8s.io/api/core/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -27,7 +28,7 @@ import (
 const (
 	// ContentHashV1 represent the hash value of the configuration value
 	// You can only compare this value for equality.
-	ContentHash = "workshop.golab.io/contentHashV1"
+	ContentHashV1 = "contenthashv1.workshop.golab.io"
 )
 
 var (
@@ -41,9 +42,13 @@ type Manager struct {
 	cli      client.Client
 }
 
+func MakeContentHashLabel(fileName string) string {
+	return ContentHashV1 + "/" + fileName
+}
+
 // IsValidKey returns true if the given key can be handled by the Manager, false otherwise
 func IsValidKey(key string) bool {
-	return key == ContentHash // for now only one key supported
+	return strings.HasPrefix(key, ContentHashV1) // for now only one key supported
 }
 
 // NewManager creates a new manager instance for the given node.
@@ -90,10 +95,7 @@ func (mgr *Manager) Get(ctx context.Context, key string) (string, bool, error) {
 	return value, ok, nil
 }
 
-// Clear removes all the labels known by this manager from
-// the managed node. If a label is managed but never added,
-// it is skipped silently.
-func (mgr *Manager) Clear(ctx context.Context) error {
+func (mgr *Manager) Clear(ctx context.Context, key string) error {
 	node := v1.Node{}
 	err := mgr.cli.Get(ctx, client.ObjectKey{Name: mgr.nodeName}, &node)
 	if err != nil {
@@ -102,6 +104,6 @@ func (mgr *Manager) Clear(ctx context.Context) error {
 	if node.Labels == nil {
 		return nil // nothing to do
 	}
-	delete(node.Labels, ContentHash)
+	delete(node.Labels, key)
 	return mgr.cli.Update(ctx, &node)
 }

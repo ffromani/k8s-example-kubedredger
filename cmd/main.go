@@ -56,7 +56,7 @@ func init() {
 
 // nolint:gocyclo
 func main() {
-	var configurationFile string
+	var configurationRoot string
 	var metricsAddr string
 	var metricsCertPath, metricsCertName, metricsCertKey string
 	var webhookCertPath, webhookCertName, webhookCertKey string
@@ -65,7 +65,7 @@ func main() {
 	var secureMetrics bool
 	var enableHTTP2 bool
 	var tlsOpts []func(*tls.Config)
-	flag.StringVar(&configurationFile, "configuration-file", "/tmp/config", "The configuration file path")
+	flag.StringVar(&configurationRoot, "configuration-root", "/tmp/config.d", "The configuration file root (directory)")
 	flag.StringVar(&metricsAddr, "metrics-bind-address", "0", "The address the metrics endpoint binds to. "+
 		"Use :8443 for HTTPS or :8080 for HTTP, or leave as 0 to disable the metrics service.")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
@@ -89,14 +89,14 @@ func main() {
 	opts.BindFlags(flag.CommandLine)
 	flag.Parse()
 
+	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
+
 	var err error
 	nodeName := os.Getenv("NODE_NAME")
 	if nodeName == "" {
 		setupLog.Error(err, "unable to detect the name of the node")
 		os.Exit(1)
 	}
-
-	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
 
 	// if the enable-http2 flag is false (the default), http/2 should be disabled
 	// due to its vulnerabilities. More specifically, disabling http/2 will
@@ -184,11 +184,17 @@ func main() {
 		os.Exit(1)
 	}
 
+	confMgr := configfile.NewManager(configurationRoot)
+	if err := confMgr.CleanAll(setupLog); err != nil {
+		setupLog.Error(err, "unable to clean all the stale configuration")
+		os.Exit(1)
+	}
+
 	cli := mgr.GetClient()
 	if err := (&controller.ConfigurationReconciler{
 		Client:   cli,
 		Scheme:   mgr.GetScheme(),
-		ConfMgr:  configfile.NewManager(configurationFile),
+		ConfMgr:  confMgr,
 		Labeller: nodelabel.NewManager(nodeName, cli),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Configuration")

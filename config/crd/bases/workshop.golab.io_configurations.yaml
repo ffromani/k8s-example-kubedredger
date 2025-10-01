@@ -59,11 +59,18 @@ spec:
                 description: Create indicates whether to create the file if it does
                   not exist
                 type: boolean
+              filename:
+                description: Filename is the full name of the configuration file within
+                  the root
+                type: string
               permission:
+                description: 'Permission is the UNIX permission octal bit mask (example:
+                  0644) the file should have'
                 format: int32
                 type: integer
             required:
             - content
+            - filename
             type: object
           status:
             description: status defines the observed state of Configuration

@@ -51,17 +51,16 @@ func NewFakeConfigurationReconciler() (*ConfigurationReconciler, string, func() 
 		return nil, "", func() error { return nil }, err
 	}
 	GinkgoLogr.Info("created temporary directory", "path", dir)
-	configFile := filepath.Join(dir, "config.conf")
 	cleanup := func() error {
 		return os.RemoveAll(dir)
 	}
 	rec := ConfigurationReconciler{
 		Client:   k8sClient,
 		Scheme:   scheme.Scheme,
-		ConfMgr:  configfile.NewManager(configFile),
+		ConfMgr:  configfile.NewManager(dir),
 		Labeller: nodelabel.NewManager(testNodeName, k8sClient),
 	}
-	return &rec, configFile, cleanup, nil
+	return &rec, dir, cleanup, nil
 }
 
 var _ = Describe("Configuration Controller", func() {
@@ -71,11 +70,11 @@ var _ = Describe("Configuration Controller", func() {
 	Context("When reconciling a resource", func() {
 		var cleanup func() error
 		var reconciler *ConfigurationReconciler
-		var configPath string
+		var configRoot string
 
 		BeforeEach(func() {
 			var err error
-			reconciler, configPath, cleanup, err = NewFakeConfigurationReconciler()
+			reconciler, configRoot, cleanup, err = NewFakeConfigurationReconciler()
 			Expect(err).ToNot(HaveOccurred())
 
 			testNode = &v1.Node{
@@ -121,9 +120,9 @@ var _ = Describe("Configuration Controller", func() {
 						Name:      "test-create",
 					},
 					Spec: workshopv1alpha1.ConfigurationSpec{
-						Content:    "foo=bar\nbaz=42\n",
-						Create:     true,
-						Permission: ptr.To[uint32](0600),
+						Filename: "foo.conf",
+						Content:  "foo=bar\nbaz=42\n",
+						Create:   true,
 					},
 				}
 				Expect(reconciler.Client.Create(ctx, conf)).To(Succeed())
@@ -135,10 +134,10 @@ var _ = Describe("Configuration Controller", func() {
 				_, err := reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: key})
 				Expect(err).NotTo(HaveOccurred())
 
-				finfo, err := os.Stat(configPath)
+				configPath := filepath.Join(configRoot, conf.Spec.Filename)
+				_, err = os.Stat(configPath)
 				Expect(err).NotTo(HaveOccurred(), "error Stat()ing configuration file")
 
-				Expect(uint32(finfo.Mode())).To(Equal(uint32(0600)), "error checking permissions, got %o expected %o", finfo.Mode(), 0600)
 				data, err := os.ReadFile(configPath)
 				Expect(err).NotTo(HaveOccurred(), "error reading configuration file content")
 				Expect(string(data)).To(Equal(conf.Spec.Content), "configuration content doesn't match")
@@ -155,6 +154,7 @@ var _ = Describe("Configuration Controller", func() {
 						Name:      "test-create",
 					},
 					Spec: workshopv1alpha1.ConfigurationSpec{
+						Filename:   "bar2.conf",
 						Content:    "foo=bar\n",
 						Create:     true,
 						Permission: ptr.To[uint32](0600),
@@ -169,6 +169,7 @@ var _ = Describe("Configuration Controller", func() {
 				_, err := reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: key})
 				Expect(err).NotTo(HaveOccurred())
 
+				configPath := filepath.Join(configRoot, conf.Spec.Filename)
 				finfo, err := os.Stat(configPath)
 				Expect(err).NotTo(HaveOccurred(), "error Stat()ing configuration file")
 				Expect(uint32(finfo.Mode())).To(Equal(uint32(0600)), "error checking permissions, got %o expected %o", finfo.Mode(), 0600)
@@ -199,7 +200,7 @@ var _ = Describe("Configuration Controller", func() {
 
 				Expect(reconciler.Client.Get(ctx, key, updatedConf)).To(Succeed())
 				Expect(verifyAvailableStatus(&updatedConf.Status)).To(Succeed())
-				Expect(verifyNodeIsLabelled(ctx, reconciler.Client, testNode.Name)).To(Succeed())
+				Expect(verifyNodeIsLabelled(ctx, reconciler.Client, testNode.Name, updatedConf.Spec.Filename)).To(Succeed())
 			})
 
 			It("does not create the same configuration file twice", func(ctx context.Context) {
@@ -210,6 +211,7 @@ var _ = Describe("Configuration Controller", func() {
 						Name:      "test-create",
 					},
 					Spec: workshopv1alpha1.ConfigurationSpec{
+						Filename:   "foo5.conf",
 						Content:    origContent,
 						Create:     true,
 						Permission: ptr.To[uint32](0600),
@@ -224,6 +226,7 @@ var _ = Describe("Configuration Controller", func() {
 				_, err := reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: key})
 				Expect(err).NotTo(HaveOccurred())
 
+				configPath := filepath.Join(configRoot, conf.Spec.Filename)
 				finfo, err := os.Stat(configPath)
 				Expect(err).NotTo(HaveOccurred(), "error Stat()ing configuration file")
 				Expect(uint32(finfo.Mode())).To(Equal(uint32(0600)), "error checking permissions, got %o expected %o", finfo.Mode(), 0600)
@@ -253,7 +256,6 @@ var _ = Describe("Configuration Controller", func() {
 				Expect(reconciler.Client.Get(ctx, key, updatedConf)).To(Succeed())
 				Expect(verifyAvailableStatus(&updatedConf.Status)).To(Succeed())
 			})
-
 			It("updates the configuration once created multiple times", func(ctx context.Context) {
 				conf := &workshopv1alpha1.Configuration{
 					ObjectMeta: metav1.ObjectMeta{
@@ -261,6 +263,7 @@ var _ = Describe("Configuration Controller", func() {
 						Name:      "test-create",
 					},
 					Spec: workshopv1alpha1.ConfigurationSpec{
+						Filename:   "quux.conf",
 						Content:    "foo=bar\n",
 						Create:     true,
 						Permission: ptr.To[uint32](0600),
@@ -276,6 +279,7 @@ var _ = Describe("Configuration Controller", func() {
 				_, err := reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: key})
 				Expect(err).NotTo(HaveOccurred())
 
+				configPath := filepath.Join(configRoot, conf.Spec.Filename)
 				finfo, err := os.Stat(configPath)
 				Expect(err).NotTo(HaveOccurred(), "error Stat()ing configuration file")
 				Expect(uint32(finfo.Mode())).To(Equal(uint32(0600)), "error checking permissions, got %o expected %o", finfo.Mode(), 0600)
@@ -306,7 +310,7 @@ var _ = Describe("Configuration Controller", func() {
 
 				Expect(reconciler.Client.Get(ctx, key, updatedConf)).To(Succeed())
 				Expect(verifyAvailableStatus(&updatedConf.Status)).To(Succeed())
-				Expect(verifyNodeIsLabelled(ctx, reconciler.Client, testNode.Name)).To(Succeed())
+				Expect(verifyNodeIsLabelled(ctx, reconciler.Client, testNode.Name, updatedConf.Spec.Filename)).To(Succeed())
 
 				Expect(reconciler.Client.Get(ctx, client.ObjectKeyFromObject(conf), conf)).To(Succeed())
 				conf.Spec.Create = false
@@ -326,9 +330,8 @@ var _ = Describe("Configuration Controller", func() {
 
 				Expect(reconciler.Client.Get(ctx, key, updatedConf)).To(Succeed())
 				Expect(verifyAvailableStatus(&updatedConf.Status)).To(Succeed())
-				Expect(verifyNodeIsLabelled(ctx, reconciler.Client, testNode.Name)).To(Succeed())
+				Expect(verifyNodeIsLabelled(ctx, reconciler.Client, testNode.Name, updatedConf.Spec.Filename)).To(Succeed())
 			})
-
 		})
 
 		When("node objects are missing", func() {
@@ -339,8 +342,9 @@ var _ = Describe("Configuration Controller", func() {
 						Name:      "test-create",
 					},
 					Spec: workshopv1alpha1.ConfigurationSpec{
-						Content: "foo=bar\nbaz=42\n",
-						Create:  true,
+						Filename: "golab.conf",
+						Content:  "foo=bar\nbaz=42\n",
+						Create:   true,
 					},
 				}
 				Expect(reconciler.Client.Create(ctx, conf)).To(Succeed())
@@ -356,6 +360,7 @@ var _ = Describe("Configuration Controller", func() {
 				Expect(reconciler.Client.Get(ctx, key, updatedConf)).To(Succeed())
 				Expect(verifyProgressingStatus(&updatedConf.Status)).To(Succeed())
 
+				configPath := filepath.Join(configRoot, conf.Spec.Filename)
 				// still should have created the file!
 				_, err = os.Stat(configPath)
 				Expect(err).NotTo(HaveOccurred(), "error Stat()ing configuration file")
@@ -365,7 +370,6 @@ var _ = Describe("Configuration Controller", func() {
 				Expect(string(data)).To(Equal(conf.Spec.Content), "configuration content doesn't match")
 			})
 		})
-
 		It("creates the configuration from scratch, but stays in progress if can't update the k8s node object, then succeeds", func(ctx context.Context) {
 			conf := &workshopv1alpha1.Configuration{
 				ObjectMeta: metav1.ObjectMeta{
@@ -373,6 +377,7 @@ var _ = Describe("Configuration Controller", func() {
 					Name:      "test-create",
 				},
 				Spec: workshopv1alpha1.ConfigurationSpec{
+					Filename:   "golab2025.conf",
 					Content:    "foo=bar\nbaz=42\n",
 					Create:     true,
 					Permission: ptr.To[uint32](0600),
@@ -391,6 +396,7 @@ var _ = Describe("Configuration Controller", func() {
 			Expect(reconciler.Client.Get(ctx, key, updatedConf)).To(Succeed())
 			Expect(verifyProgressingStatus(&updatedConf.Status)).To(Succeed())
 
+			configPath := filepath.Join(configRoot, conf.Spec.Filename)
 			// still should have created the file!
 			finfo, err := os.Stat(configPath)
 			Expect(err).NotTo(HaveOccurred(), "error Stat()ing configuration file")
@@ -407,7 +413,7 @@ var _ = Describe("Configuration Controller", func() {
 
 			var updatedNode v1.Node
 			Expect(reconciler.Client.Get(ctx, client.ObjectKeyFromObject(testNode), &updatedNode)).To(Succeed())
-			Expect(updatedNode.Labels).ToNot(HaveKey(nodelabel.ContentHash))
+			Expect(updatedNode.Labels).ToNot(HaveKey(nodelabel.MakeContentHashLabel(conf.Spec.Filename)))
 
 			_, err = reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: key})
 			Expect(err).ToNot(HaveOccurred())
@@ -422,7 +428,7 @@ var _ = Describe("Configuration Controller", func() {
 			Expect(reconciler.Client.Get(ctx, key, updatedConf)).To(Succeed())
 			Expect(verifyAvailableStatus(&updatedConf.Status)).To(Succeed())
 
-			Expect(verifyNodeIsLabelled(ctx, reconciler.Client, testNode.Name)).To(Succeed())
+			Expect(verifyNodeIsLabelled(ctx, reconciler.Client, testNode.Name, updatedConf.Spec.Filename)).To(Succeed())
 		})
 	})
 })
@@ -456,12 +462,12 @@ func isConditionEqual(conds []metav1.Condition, condType string, condStatus meta
 	}
 	return false
 }
-func verifyNodeIsLabelled(ctx context.Context, cli client.Client, nodeName string) error {
+func verifyNodeIsLabelled(ctx context.Context, cli client.Client, nodeName, fileName string) error {
 	var updatedNode v1.Node
 	if err := cli.Get(ctx, client.ObjectKey{Name: nodeName}, &updatedNode); err != nil {
 		return err
 	}
-	val, ok := updatedNode.Labels[nodelabel.ContentHash]
+	val, ok := updatedNode.Labels[nodelabel.MakeContentHashLabel(fileName)]
 	if !ok {
 		return errors.New("missing contenthash key")
 	}

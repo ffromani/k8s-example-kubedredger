@@ -22,15 +22,23 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/go-logr/logr"
+
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
 	workshopv1alpha1 "golab.io/kubedredger/api/v1alpha1"
 	"golab.io/kubedredger/internal/configfile"
 	"golab.io/kubedredger/internal/nodelabel"
+	"golab.io/kubedredger/internal/validate"
+)
+
+const (
+	Finalizer = "workshop.golab.io/finalizer2025"
 )
 
 // ConfigurationReconciler reconciles a Configuration object
@@ -56,42 +64,83 @@ func (r *ConfigurationReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 
 	conf := workshopv1alpha1.Configuration{}
 	err := r.Get(ctx, req.NamespacedName, &conf)
-	if apierrors.IsNotFound(err) {
-		if err := r.ConfMgr.Delete(); err != nil {
-			return ctrl.Result{}, fmt.Errorf("failed to delete the configuration: %w", err)
-		}
-		return ctrl.Result{}, nil
-	}
-
 	if err != nil {
 		// Error reading the object - requeue the request.
+		return ctrl.Result{}, client.IgnoreNotFound(err)
+	}
+
+	err = validate.Request(conf.Spec)
+	if err != nil {
 		return ctrl.Result{}, err
 	}
 
+	if !conf.DeletionTimestamp.IsZero() {
+		// Deletion
+		if controllerutil.ContainsFinalizer(&conf, Finalizer) {
+			err = r.syncForDelete(ctx, lh, &conf)
+			if err != nil {
+				return ctrl.Result{}, err
+			}
+			controllerutil.RemoveFinalizer(&conf, Finalizer)
+			err = r.Update(ctx, &conf)
+			return ctrl.Result{}, err
+		}
+	}
+
+	// Add or Update
+	if !controllerutil.ContainsFinalizer(&conf, Finalizer) {
+		controllerutil.AddFinalizer(&conf, Finalizer)
+		err = r.Update(ctx, &conf)
+		if err != nil {
+			return ctrl.Result{}, err
+		}
+	}
+
+	err = r.syncForAddOrUpdate(ctx, lh, &conf)
+	return ctrl.Result{}, err
+}
+
+func (r *ConfigurationReconciler) syncForDelete(ctx context.Context, lh logr.Logger, conf *workshopv1alpha1.Configuration) error {
+	lh.Info("handling deletion requesi", "config", conf.Spec.Filename)
+	err := r.ConfMgr.Delete(conf.Spec.Filename)
+	if err != nil {
+		return fmt.Errorf("failed to delete the configuration %q: %w", conf.Spec.Filename, err)
+	}
+
+	lh.Info("removing node label", "config", conf.Spec.Filename)
+	err = r.Labeller.Clear(ctx, nodelabel.MakeContentHashLabel(conf.Spec.Filename))
+	if err != nil {
+		return fmt.Errorf("failed to delete the node label %q: %w", conf.Spec.Filename, err)
+	}
+	return nil
+}
+
+func (r *ConfigurationReconciler) syncForAddOrUpdate(ctx context.Context, lh logr.Logger, conf *workshopv1alpha1.Configuration) error {
 	oldStatus := conf.Status.DeepCopy()
 	configurationRequest := configurationRequestFromSpec(conf.Spec)
 
-	err = r.ConfMgr.HandleSync(lh, configurationRequest)
+	err := r.ConfMgr.HandleSync(lh, configurationRequest)
 	if errors.As(err, &configfile.NonRecoverableError{}) {
 		lh.Error(err, "Non-recoverable error handling configuration")
-		return ctrl.Result{}, nil
+		return nil
 	}
 
 	contentHash := fmt.Sprintf("%x", sha256.Sum256([]byte(conf.Spec.Content)))[:60]
-	err = r.Labeller.Set(ctx, nodelabel.ContentHash, contentHash)
+	err = r.Labeller.Set(ctx, nodelabel.MakeContentHashLabel(conf.Spec.Filename), contentHash)
 	lh.Info("labelled node", "value", contentHash, "error", err)
 
-	confStatus := r.ConfMgr.Status()
+	confStatus := r.ConfMgr.Status(configurationRequest.Filename)
+	lh.Info("file status", "fileName", configurationRequest.Filename, "status", confStatus)
 	conf.Status = statusFromConfStatus(conf.Spec, confStatus, err)
 
 	if !statusesAreEqual(oldStatus, &conf.Status) {
-		updErr := r.Client.Status().Update(ctx, &conf)
+		updErr := r.Client.Status().Update(ctx, conf)
 		if updErr != nil && !apierrors.IsNotFound(updErr) {
 			lh.Error(updErr, "Failed to update configuration status")
-			return ctrl.Result{}, fmt.Errorf("could not update status for object %s: %w", client.ObjectKeyFromObject(&conf), updErr)
+			return fmt.Errorf("could not update status for object %s: %w", client.ObjectKeyFromObject(conf), updErr)
 		}
 	}
-	return ctrl.Result{}, err
+	return err
 }
 
 // SetupWithManager sets up the controller with the Manager.

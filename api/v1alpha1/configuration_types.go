@@ -22,6 +22,9 @@ import (
 
 // ConfigurationSpec defines the desired state of Configuration
 type ConfigurationSpec struct {
+	// Filename is the full name of the configuration file within the root
+	Filename string `json:"filename"`
+
 	// Content is the content to be written to the file
 	Content string `json:"content"`
 
