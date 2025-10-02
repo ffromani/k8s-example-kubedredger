@@ -45,7 +45,7 @@ all: build
 
 .PHONY: help
 help: ## Display this help.
-	@awk 'BEGIN {FS = ":.*##"; printf "\nUsage:\n  make \033[36m<target>\033[0m\n"} /^[a-zA-Z_0-9-]+:.*?##/ { printf "  \033[36m%-23s\033[0m %s\n", $$1, $$2 } /^##@/ { printf "\n\033[1m%s\033[0m\n", substr($$0, 5) } ' $(MAKEFILE_LIST)
+	@awk 'BEGIN {FS = ":.*##"; printf "\nUsage:\n  make \033[36m<target>\033[0m\n"} /^[a-zA-Z_0-9-]+:.*?##/ { printf "  \033[36m%-29s\033[0m %s\n", $$1, $$2 } /^##@/ { printf "\n\033[1m%s\033[0m\n", substr($$0, 5) } ' $(MAKEFILE_LIST)
 
 ##@ Development
 
@@ -234,12 +234,12 @@ $(GOLANGCI_LINT): dep-install-golangci-lint
 
 # extra deps
 .PHONY: test-e2e-golab
-test-e2e-golab: deploy-on-kind
+test-e2e-golab: deploy-on-kind  ## Runs the workshop example e2e tests
 	KIND=$(KIND) KIND_CLUSTER=$(KIND_CLUSTER) go test -tags=e2e ./test/e2eworkshop/ -v -ginkgo.v
 	$(MAKE) cleanup-test-e2e
 
 .PHONY: deploy-on-kind
-deploy-on-kind: dep-install-kubectl dep-install-kind docker-build kind-setup kind-load-image deploy
+deploy-on-kind: dep-install-kubectl dep-install-kind docker-build kind-setup kind-load-image deploy  ## Prepares an environment with the controller running
 	$(KUBECTL) delete pods --all -n k8s-example-kubedredger-system
 
 
