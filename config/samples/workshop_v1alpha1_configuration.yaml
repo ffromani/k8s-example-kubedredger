@@ -2,7 +2,7 @@ apiVersion: workshop.golab.io/v1alpha1
 kind: Configuration
 metadata:
   labels:
-    app.kubernetes.io/name: k8s-example-kubedredger
+    app.kubernetes.io/name: kubedredger
     app.kubernetes.io/managed-by: kustomize
   name: configuration-sample
 spec:

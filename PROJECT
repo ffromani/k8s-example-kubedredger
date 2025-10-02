@@ -6,7 +6,7 @@ cliVersion: 4.8.0
 domain: golab.io
 layout:
 - go.kubebuilder.io/v4
-projectName: k8s-example-kubedredger
+projectName: kubedredger
 repo: golab.io/kubedredger
 resources:
 - api:
