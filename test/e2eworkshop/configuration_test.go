@@ -27,7 +27,7 @@ var _ = ginkgo.Describe("Configuration E2E", func() {
 	)
 
 	ginkgo.BeforeEach(func() {
-		testNamespace = "k8s-example-kubedredger-system"
+		testNamespace = "golab-kubedredger"
 		confRoot = "/tmp/config.d"
 		confName = "kubedredger.conf"
 
@@ -103,7 +103,7 @@ var _ = ginkgo.Describe("Configuration E2E", func() {
 		confPath := filepath.Join(confRoot, confName)
 		ginkgo.By("verifying the file content in the kind container using docker: " + confPath)
 		Eventually(func() string {
-			cmd := exec.Command("docker", "exec", "k8s-example-kubedredger-kind-control-plane", "cat", confPath)
+			cmd := exec.Command("docker", "exec", "kubedredger-kind-control-plane", "cat", confPath)
 			output, err := cmd.Output()
 			if err != nil {
 				return ""
