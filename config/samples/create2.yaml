@@ -1,0 +1,11 @@
+apiVersion: workshop.golab.io/v1alpha1
+kind: Configuration
+metadata:
+  labels:
+    app.kubernetes.io/name: kubedredger
+    app.kubernetes.io/managed-by: kustomize
+  name: golab-florence
+spec:
+  filename: "golab-florence.conf"
+  create: true
+  content: "hello golab 2025 in florence!"

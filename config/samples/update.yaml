@@ -1,0 +1,11 @@
+apiVersion: workshop.golab.io/v1alpha1
+kind: Configuration
+metadata:
+  labels:
+    app.kubernetes.io/name: kubedredger
+    app.kubernetes.io/managed-by: kustomize
+  name: golab-workshop
+spec:
+  filename: "golab.conf"
+  content: "hello golab workshop 2025!\n"
+  permission: 0600
